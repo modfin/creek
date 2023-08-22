@@ -1,0 +1,16 @@
+desc: re builds go
+triggers:
+  - name: ''
+    pattens:
+      - '**/*.go'
+    env:
+      DEBUG: '1'
+    cmd: cd /go/src/creek && go run ./cmd/creekd.go
+    shell: true
+    delay: 100ms
+    stop_timeout: 500ms
+    signal: KILL
+    kill_signal: 'SIGTERM'
+watch_paths:
+  - .
+watch_depth: 10

@@ -1,0 +1,18 @@
+FROM golang:1.20-alpine3.17
+
+RUN go install github.com/codeskyblue/fswatch@v0.0.0-20200812032752-892e1e55b602
+
+ARG UID
+ARG USER
+
+RUN if test "$USER" != 'root'; then adduser --disabled-password --uid "$UID" "$USER"; fi
+RUN chown -R ${UID} /go/pkg
+RUN chmod -R +w /go/pkg
+
+USER $USER
+
+RUN mkdir -p /go/src/creek/
+WORKDIR /go/src/creek
+
+# run fswatch
+CMD cd /go/src/creek && fswatch -config ./fsw.yml

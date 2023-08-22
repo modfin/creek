@@ -1,0 +1,73 @@
+version: '3.0'
+
+services:
+  creek-producer:
+    build:
+      dockerfile: Dockerfile.dev
+      context: .
+      args:
+        UID: ${UID}
+        USER: ${USER}
+    environment:
+      PG_URI:  ""
+      PG_PUBLICATION_NAME: "creek" # Postgres publication name
+      PG_PUBLICATION_SLOT: "creek_0" # Postgres publication slot name
+      PG_TABLES: ""
+      NATS_URI: "nats://nats-server:4222" # NATS url
+      NATS_NAMESPACE: "CREEK" # Name of the NATS JetStream Stream
+    volumes:
+      - .:/go/src/creek
+      - gopkg:/go/pkg
+    networks: ["creek"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "7779:7779"
+
+  nats-server:
+    image: nats
+    ports:
+      - "8222:8222"
+      - "4222:4222"
+    command: "--http_port 8222 -js"
+    networks: ["creek"]
+
+  nats-exporter:
+    image: natsio/prometheus-nats-exporter
+    ports:
+      - "7777:7777"
+    networks: ["creek"]
+    command: "-varz -jsz=all http://nats-server:8222"
+    depends_on:
+      - nats-server
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - .supporting/prometheus:/etc/prometheus
+      - prom_data:/prometheus
+    networks: ["creek"]
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+  grafana:
+    image: grafana/grafana
+    networks: ["creek"]
+    ports:
+      - 3000:3000
+    volumes:
+      - .supporting/grafana/datasources:/etc/grafana/provisioning/datasources
+      - .supporting/grafana/dashboard.yaml:/etc/grafana/provisioning/dashboards/main.yaml
+      - .supporting/grafana/dashboards:/var/lib/grafana/dashboards
+
+
+
+networks:
+  creek:
+    name: creek
+    driver: bridge
+
+volumes:
+  prom_data:
+  producer_data:
+  gopkg:
