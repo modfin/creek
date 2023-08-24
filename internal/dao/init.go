@@ -290,3 +290,8 @@ func (db *DB) CanSnapshot(namespace string, table string) (bool, error) {
 
 	return true, nil
 }
+
+func (db *DB) GetCurrLSN() (lsn pglogrepl.LSN, err error) {
+	err = db.pool.QueryRow(db.ctx, "SELECT pg_current_wal_lsn()").Scan(&lsn)
+	return
+}

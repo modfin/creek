@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jackc/pglogrepl"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"net/http"
 	"time"
 
-	"github.com/labstack/echo-contrib/echoprometheus"
-	"github.com/labstack/echo/v4"
 	"github.com/modfin/creek"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
@@ -19,28 +19,53 @@ var pgReads = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Help: "total numbers of row into postgres from creek streams",
 }, []string{"creek_stream_type", "creek_producer_pg_op", "creek_pg_source"})
 
+var behindTime = prometheus.NewGauge(prometheus.GaugeOpts{
+	Name: "creek_producer_pg_behind_time",
+	Help: "total time between postgres wal event and processing in milliseconds",
+})
+
+var behindBytes = prometheus.NewGauge(prometheus.GaugeOpts{
+	Name: "creek_producer_pg_behind_bytes",
+	Help: "total unprocessed bytes in wal log",
+})
+
 func init() {
 	prometheus.MustRegister(pgReads)
+	prometheus.MustRegister(behindTime)
+	prometheus.MustRegister(behindBytes)
 }
 
 func Start(ctx context.Context, port int) {
-	e := echo.New()
-	e.Use(echoprometheus.NewMiddleware("creek_producer")) // adds middleware to gather metrics
-	e.GET("/metrics", echoprometheus.NewHandler())
+	srv := &http.Server{Addr: fmt.Sprintf(":%d", port)}
+	http.Handle("/metrics", promhttp.Handler())
 
 	go func() {
 		<-ctx.Done()
 		cc, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		logrus.Info("shutting down metrics server")
-		_ = e.Shutdown(cc)
+		srv.Shutdown(cc)
 		logrus.Info("metrics server is shut down")
 	}()
 
-	err := e.Start(fmt.Sprintf(":%d", port))
+	logrus.Infof("starting metrics server on :%d", port)
+
+	err := srv.ListenAndServe()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logrus.Fatal(err)
+		logrus.Error(err)
 	}
+}
+
+func SetBehindLSN(last pglogrepl.LSN, lastProcessed pglogrepl.LSN) {
+	diff := float64(last - lastProcessed)
+	if diff < 0 {
+		diff = 0
+	}
+	behindBytes.Set(diff)
+}
+
+func SetBehindTime(duration time.Duration) {
+	behindTime.Set(float64(duration.Milliseconds()))
 }
 
 func IncRead(streamType creek.StreamType, op string, source string) {

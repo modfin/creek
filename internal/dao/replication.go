@@ -93,7 +93,7 @@ func (r *Replication) sendStatusUpdate() {
 
 func (r *Replication) start() {
 
-	timeout := time.Now().Add(time.Second * 10)
+	timeout := time.Now().Add(time.Second * 5)
 
 	for {
 		select {
@@ -123,7 +123,11 @@ func (r *Replication) start() {
 
 		if pgconn.Timeout(err) {
 			r.sendStatusUpdate()
-			timeout = time.Now().Add(time.Minute)
+			last, err := r.parent.GetCurrLSN()
+			if err == nil && r.currLSN != 0 {
+				metrics.SetBehindLSN(last, r.currLSN)
+			}
+			timeout = time.Now().Add(time.Second * 5)
 			continue
 		}
 
@@ -166,6 +170,12 @@ func (r *Replication) start() {
 				"ServerTime:", pkm.ServerTime,
 				"ReplyRequested:", pkm.ReplyRequested)
 
+			last, err := r.parent.GetCurrLSN()
+			if err == nil {
+				metrics.SetBehindLSN(last, pkm.ServerWALEnd)
+			}
+			metrics.SetBehindTime(time.Now().Sub(pkm.ServerTime))
+
 			if pkm.ReplyRequested {
 				timeout = time.Time{}
 				continue
@@ -193,6 +203,7 @@ func (r *Replication) start() {
 			switch logicalMsg := logicalMsg.(type) {
 			case *pglogrepl.BeginMessage:
 				r.intx = true
+				metrics.SetBehindTime(time.Now().Sub(logicalMsg.CommitTime))
 				r.handleBeginMessage(logicalMsg)
 
 			case *pglogrepl.RelationMessage:
@@ -205,6 +216,7 @@ func (r *Replication) start() {
 
 			case *pglogrepl.CommitMessage:
 				r.intx = false
+				metrics.SetBehindTime(time.Now().Sub(logicalMsg.CommitTime))
 				// I think this does nothing useful,
 				// since we have all necessary information from the begin message.
 

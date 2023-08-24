@@ -27,7 +27,7 @@ func main() {
 	go func() {
 		<-term
 		cancel()
-		<-time.After(2 * time.Second)
+		<-time.After(10 * time.Second)
 		os.Exit(1)
 	}()
 
