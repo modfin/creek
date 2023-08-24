@@ -19,7 +19,7 @@ func TestTimeConversion(t *testing.T) {
 
 	assert.NoError(t, err)
 
-	assert.Equal(t, time.Duration(123), output)
+	assert.Equal(t, time.Microsecond*123, output)
 }
 
 func TestUUIDConversion(t *testing.T) {

@@ -29,12 +29,11 @@ func MapToNativeTypes(m map[string]any) (map[string]any, error) {
 func pgtypeToNative(pgType any) (any, error) {
 	switch t := pgType.(type) {
 	case pgtype.Time:
-		return time.Duration(t.Microseconds), nil
+		return time.Duration(t.Microseconds * 1000), nil
 	case pgtype.UUID:
 		s, _ := t.Value() // this function cannot fail
 		return s, nil
 	case pgtype.Date:
-		logrus.Debugf("date: %v", t)
 		if t.InfinityModifier == pgtype.Infinity {
 			return pgtype.Infinity, nil
 		} else if t.InfinityModifier == pgtype.NegativeInfinity {
