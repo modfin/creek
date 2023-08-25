@@ -104,6 +104,7 @@ type SchemaMsg struct {
 
 // SnapshotHeader the first message on a snapshot channel
 type SnapshotHeader struct {
+	Topic       string    `json:"topic"`
 	Fingerprint string    `json:"fingerprint"`
 	Schema      string    `json:"schema"`
 	TxId        uint32    `json:"tx_id"`
