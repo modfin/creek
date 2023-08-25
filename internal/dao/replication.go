@@ -309,7 +309,6 @@ func (r *Replication) handleRelationMessage(msg *pglogrepl.RelationMessage) erro
 }
 
 func (r *Replication) handleTypeMessage(msg *pglogrepl.TypeMessage) {
-	//ds.AvroTypeMap.RegisterType(&pgtypeavro.SQLType{Name: msg.Name, OID: msg.DataType})
 }
 
 func (r *Replication) handleInsertMessage(msg *pglogrepl.InsertMessage) error {

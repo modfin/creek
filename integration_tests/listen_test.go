@@ -762,3 +762,27 @@ func TestSchema(t *testing.T) {
 	assert.NoError(t, err)
 	assert.JSONEq(t, expectedJSON, schema.Schema)
 }
+
+func TestPartitions(t *testing.T) {
+	EnsureStarted()
+	db := GetDBConn()
+	creekConn := GetCreekConn()
+
+	_, err := db.Query(context.Background(), "INSERT INTO public.prices VALUES (1, 43.01, '2022-09-13'), (2, 16.98, '2023-09-13');")
+	assert.NoError(t, err)
+
+	stream, err := creekConn.SteamWAL(context.TODO(), DBname, "public.prices")
+	assert.NoError(t, err)
+
+	msg, err := stream.Next(context.TODO())
+	assert.NoError(t, err)
+
+	assert.Equal(t, DBname, msg.Source.DB)
+	assert.Equal(t, "public", msg.Source.Schema)
+	assert.Equal(t, "prices", msg.Source.Table)
+
+	msg, err = stream.Next(context.TODO())
+	assert.NoError(t, err)
+	assert.Equal(t, "public", msg.Source.Schema)
+	assert.Equal(t, "prices", msg.Source.Table)
+}

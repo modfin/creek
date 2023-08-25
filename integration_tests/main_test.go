@@ -24,6 +24,7 @@ func TestMain(m *testing.M) {
 
 	LoadSql("base.sql")
 	LoadSql("types.sql")
+	LoadSql("partitions.sql")
 
 	// Run tests...
 	exitCode := m.Run()

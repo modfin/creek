@@ -125,7 +125,7 @@ func (db *DB) ensurePublication(name string, tables []string) error {
 		return nil
 	}
 
-	_, err = db.pool.Exec(db.ctx, fmt.Sprintf("CREATE PUBLICATION %s FOR TABLE %v",
+	_, err = db.pool.Exec(db.ctx, fmt.Sprintf("CREATE PUBLICATION %s FOR TABLE %v WITH (publish_via_partition_root = true)",
 		name,
 		strings.Join(tables, ",")))
 	if err != nil {

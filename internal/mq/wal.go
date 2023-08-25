@@ -2,6 +2,7 @@ package mq
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -56,8 +57,10 @@ func (mq *MQ) StartWalStream(stream <-chan creek.WAL) *WalStream {
 			// Avro Protocol
 			//  [2 bytes] [8 bytes]   [data]
 			//  ctrl      fingerprint
-
-			logrus.Tracef("sending message to %s: %#v, before: %v, after: %v", fmt.Sprintf("%s.%s.%s", mq.ns, creek.WalStream, wal.LocalIdentifier()), wal, wal.Before, wal.After)
+			if logrus.GetLevel() >= logrus.TraceLevel {
+				b, _ := json.Marshal(wal)
+				logrus.Tracef("sending message to %s: %s", fmt.Sprintf("%s.%s.%s", mq.ns, creek.WalStream, wal.LocalIdentifier()), string(b))
+			}
 
 			mq.publishBus <- msg{
 				subject: fmt.Sprintf("%s.%s.%s", mq.ns, creek.WalStream, wal.LocalIdentifier()),
@@ -68,7 +71,6 @@ func (mq *MQ) StartWalStream(stream <-chan creek.WAL) *WalStream {
 
 		ws.doneChan <- struct{}{}
 		logrus.Info("closed wal stream")
-
 	}()
 
 	return &ws

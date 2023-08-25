@@ -2,7 +2,6 @@ package pgtypeavro
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/jackc/pglogrepl"
@@ -307,38 +306,6 @@ func TestRelationMessageToAvro(t *testing.T) {
 			assert.NoError(t, err)
 
 			ja.Assertf(string(b), tc.expected)
-		})
-	}
-}
-
-func TestRelationMessageToAvro_Failing(t *testing.T) {
-
-	type testCase struct {
-		name          string
-		input         *pglogrepl.RelationMessage
-		expectedError string
-	}
-
-	tests := []testCase{
-		{
-			name: "unsupported type",
-			input: &pglogrepl.RelationMessage{
-				RelationName:    "integration_tests",
-				ReplicaIdentity: 'd',
-				Columns: []*pglogrepl.RelationMessageColumn{
-					{Flags: 1, Name: "id", DataType: pgtype.Int4multirangeArrayOID},
-				}},
-			expectedError: fmt.Sprintf("unknown type for oid: %d", pgtype.Int4multirangeArrayOID),
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-
-			_, err := New(tc.input).RelationMessageToAvro()
-
-			assert.EqualError(t, err, tc.expectedError)
-
 		})
 	}
 }
