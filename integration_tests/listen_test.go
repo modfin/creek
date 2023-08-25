@@ -18,7 +18,7 @@ func TestSetup(t *testing.T) {
 	var numRows int
 	err := db.QueryRow(context.Background(), "SELECT count(*) FROM public.types_data").Scan(&numRows)
 	assert.NoError(t, err)
-	assert.Equal(t, 10000, numRows)
+	assert.Equal(t, 1000, numRows)
 }
 
 func TestInsert(t *testing.T) {
@@ -80,22 +80,35 @@ func TestInsert(t *testing.T) {
 	stream.Close()
 }
 
-// func TestSnap(t *testing.T) {
-// 	EnsureStarted()
-// 	//db := GetDBConn()
-// 	creekConn := GetCreekConn()
+func TestSnap(t *testing.T) {
+	EnsureStarted()
+	//db := GetDBConn()
+	creekConn := GetCreekConn()
 
-// 	reader, err := creekConn.Snapshot(context.TODO(), DBname, "public.types_data")
-// 	assert.NoError(t, err)
+	reader, err := creekConn.Snapshot(context.TODO(), DBname, "public.types_data")
+	assert.NoError(t, err)
 
-// 	data, err := creekConn.ListSnapshots(context.TODO(), DBname, "public.types_data")
-// 	assert.NoError(t, err)
+	i := 0
+	for range reader.Chan() {
+		i++
+	}
 
-// 	// Should return the same as above
-// 	reader, err = creekConn.GetSnapshot(context.TODO(), data[0].Name)
-// 	assert.NoError(t, err)
+	assert.Equal(t, 1000, i)
 
-// }
+	data, err := creekConn.ListSnapshots(context.TODO(), DBname, "public.types_data")
+	assert.NoError(t, err)
+
+	// Should return the same as above
+	reader, err = creekConn.GetSnapshot(context.TODO(), data[0].Name)
+	assert.NoError(t, err)
+
+	i = 0
+	for range reader.Chan() {
+		i++
+	}
+
+	assert.Equal(t, 1000, i)
+}
 
 func TestTypes(t *testing.T) {
 	EnsureStarted()

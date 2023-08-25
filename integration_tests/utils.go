@@ -43,6 +43,11 @@ func EnsureStarted() {
 			logrus.Fatal("failed to initialize database: ", err)
 		}
 
+		err = db.Connect(testCtx)
+		if err != nil {
+			logrus.Fatal("failed to connect to database: ", err)
+		}
+
 		queue, err := mq.New(testCtx, cfg.NatsUri, cfg.NatsNameSpace, cfg.NatsMaxPending, db)
 		if err != nil {
 			logrus.Fatal("failed to initialize nats: ", err)
