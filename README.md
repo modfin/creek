@@ -307,6 +307,14 @@ max_wal_senders=5
 max_replication_slots=5
 ```
 
+Also, it is a (very) good idea to set a max size of the WAL size, otherwise it will grow to infinity 
+when the producer is offline. This option only exists since Postgres 13.
+
+```
+max_slot_wal_keep_size=16GB
+```
+
+
 ## Configuring
 
 The producer is configured using the following environment variables:

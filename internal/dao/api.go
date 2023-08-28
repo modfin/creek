@@ -12,6 +12,9 @@ import (
 )
 
 func (db *DB) startApi() {
+	b := backoff.NewExponentialBackOff()
+	b.MaxInterval = 15 * time.Second
+	b.MaxElapsedTime = 1<<63 - 1
 
 	connect := func() (*pgxpool.Conn, error) {
 		conn, err := db.pool.Acquire(db.ctx)
@@ -25,14 +28,23 @@ func (db *DB) startApi() {
 		return conn, err
 	}
 
-	conn, err := backoff.RetryWithData(connect, backoff.NewExponentialBackOff())
-	if err != nil {
-		logrus.Errorf("[listen api] failed to connect: %v", err)
+	notify := func(err error, timeout time.Duration) {
+		logrus.Errorf("[listen api] failed to connect to database, retrying in %ds", int(timeout.Seconds()))
+	}
+
+	tryConnect := func() (conn *pgxpool.Conn, err error) {
+		b = backoff.NewExponentialBackOff()
+		b.MaxInterval = 15 * time.Second
+		b.MaxElapsedTime = 1<<63 - 1
+
+		conn, err = backoff.RetryNotifyWithData(connect, b, notify)
 		return
 	}
 
-	notify := func(err error, timeout time.Duration) {
-		logrus.Errorf("[listen api] failed to connect to database, retrying in %ds", int(timeout.Seconds()))
+	conn, err := tryConnect()
+	if err != nil {
+		logrus.Errorf("[listen api] failed to connect: %v", err)
+		return
 	}
 
 	for {
@@ -48,9 +60,9 @@ func (db *DB) startApi() {
 		if err != nil {
 			logrus.Errorf("failed while waiting to get notification for creek_consumer: %v", err)
 			if err.Error() == "conn closed" {
-				conn, err = backoff.RetryNotifyWithData(connect, backoff.NewExponentialBackOff(), notify)
+				conn, err = tryConnect()
 				if err != nil {
-					logrus.Errorf("[listen api] failed to connect: %v", err)
+					logrus.Errorf("[listen api] failed to reconnect: %v", err)
 					return
 				}
 			}

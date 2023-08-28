@@ -90,7 +90,7 @@ func (r *Replication) sendStatusUpdate() {
 	if err != nil {
 		logrus.Errorln("SendStandbyStatusUpdate failed:", err)
 	}
-	logrus.Traceln("Sent Standby status message")
+	logrus.Tracef("Sent Standby status message with lsn: %s", r.xlogPos)
 }
 
 func (r *Replication) start() {
@@ -137,9 +137,9 @@ func (r *Replication) start() {
 			logrus.Errorf("recieveMessage error: %+v", err)
 
 			if err.Error() == "conn closed" {
-				err = r.tryConnect()
+				err = r.tryConnect() // Should block
 				if err != nil {
-					logrus.Errorf("failed to reconnect to database: %v, retrying", err)
+					logrus.Errorf("failed to reconnect to database: %v", err)
 				}
 				cancel()
 			}
@@ -580,6 +580,9 @@ func (r *Replication) baseMessage(rel Relation) creek.WAL {
 }
 
 func (r *Replication) tryConnect() (err error) {
+	b := backoff.NewExponentialBackOff()
+	b.MaxInterval = 15 * time.Second
+	b.MaxElapsedTime = 1<<63 - 1
 
 	operation := func() (*pgconn.PgConn, error) {
 		conn, _, err := r.parent.connectSlot(context.Background(), r.parent.cfg.PgPublicationSlot, r.parent.cfg.PgPublicationName)
@@ -590,6 +593,6 @@ func (r *Replication) tryConnect() (err error) {
 		logrus.Errorf("[replication] failed to reconnect to database, retrying in %ds", int(timeout.Seconds()))
 	}
 
-	r.conn, err = backoff.RetryNotifyWithData(operation, backoff.NewExponentialBackOff(), notify)
+	r.conn, err = backoff.RetryNotifyWithData(operation, b, notify)
 	return err
 }
