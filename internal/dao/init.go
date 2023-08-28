@@ -217,6 +217,7 @@ func (db *DB) StartReplication(tables []string, publicationName string, publicat
 
 		conn:    conn,
 		currLSN: lsn,
+		xlogPos: lsn,
 		prevLSN: lsn,
 
 		messages:       make(chan creek.WAL, 1),

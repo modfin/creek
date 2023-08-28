@@ -14,6 +14,7 @@ import (
 	"github.com/modfin/creek"
 	pgtypeavro "github.com/modfin/creek/pgtype-avro"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
@@ -33,6 +34,7 @@ type Replication struct {
 	conn     *pgconn.PgConn
 	currLSN  pglogrepl.LSN
 	prevLSN  pglogrepl.LSN
+	xlogPos  pglogrepl.LSN
 	txid     uint32
 	commitAt time.Time
 
@@ -84,7 +86,7 @@ func (r *Replication) Done() <-chan struct{} {
 }
 
 func (r *Replication) sendStatusUpdate() {
-	err := pglogrepl.SendStandbyStatusUpdate(r.ctx, r.conn, pglogrepl.StandbyStatusUpdate{WALWritePosition: r.currLSN})
+	err := pglogrepl.SendStandbyStatusUpdate(r.ctx, r.conn, pglogrepl.StandbyStatusUpdate{WALWritePosition: r.xlogPos})
 	if err != nil {
 		logrus.Errorln("SendStandbyStatusUpdate failed:", err)
 	}
@@ -124,8 +126,8 @@ func (r *Replication) start() {
 		if pgconn.Timeout(err) {
 			r.sendStatusUpdate()
 			last, err := r.parent.GetCurrLSN()
-			if err == nil && r.currLSN != 0 {
-				metrics.SetBehindLSN(last, r.currLSN)
+			if err == nil && r.xlogPos != 0 {
+				metrics.SetBehindLSN(last, r.xlogPos)
 			}
 			timeout = time.Now().Add(time.Second * 5)
 			continue
@@ -135,18 +137,62 @@ func (r *Replication) start() {
 			logrus.Errorf("recieveMessage error: %+v", err)
 
 			if err.Error() == "conn closed" {
-				connectCtx, cancel := context.WithTimeout(r.ctx, time.Second*5)
-				err = r.tryReconnect(connectCtx)
+				err = r.tryConnect()
 				if err != nil {
 					logrus.Errorf("failed to reconnect to database: %v, retrying", err)
 				}
 				cancel()
 			}
+
 			continue
 		}
 
 		if errMsg, ok := rawMsg.(*pgproto3.ErrorResponse); ok {
-			logrus.Errorf("received Postgres WAL error: %+v", errMsg)
+			logrus.Errorf("received Postgres WAL error: %+v. Sending Sync message.", errMsg)
+			// Send sync message
+			r.conn.Frontend().Send(&pgproto3.Sync{})
+			err = r.conn.Frontend().Flush()
+			if err != nil {
+				logrus.Errorf("failed to send sync message: %v", err)
+				continue
+			}
+
+			var msg pgproto3.BackendMessage
+			msg, err = r.conn.Frontend().Receive()
+			if err != nil {
+				logrus.Errorf("failed to recieve message after Sync: %v", err)
+				continue
+			}
+			_, ok := msg.(*pgproto3.ReadyForQuery)
+			if !ok {
+				logrus.Errorf("received unexpected message after Sync: %+v", msg)
+				continue
+			}
+
+			logrus.Info("restarting replication")
+			err = pglogrepl.StartReplication(ctx, r.conn, r.parent.cfg.PgPublicationSlot, pglogrepl.LSN(0),
+				pglogrepl.StartReplicationOptions{PluginArgs: []string{"proto_version '1'", fmt.Sprintf("publication_names '%s'", r.parent.cfg.PgPublicationName)}})
+			if err != nil {
+				logrus.Errorf("failed to start replication: %v", err)
+			}
+			continue
+		}
+
+		_, ok := rawMsg.(*pgproto3.CopyDone)
+		if ok {
+			logrus.Info("received CopyDone message from backend")
+			res, err := pglogrepl.SendStandbyCopyDone(r.ctx, r.conn)
+			if err != nil {
+				logrus.Errorf("failed ack CopyDone message: %v", err)
+			}
+
+			err = pglogrepl.StartReplication(ctx, r.conn, r.parent.cfg.PgPublicationSlot, res.LSN,
+				pglogrepl.StartReplicationOptions{
+					PluginArgs: []string{"proto_version '1'", fmt.Sprintf("publication_names '%s'", r.parent.cfg.PgPublicationName)},
+					Timeline:   res.Timeline})
+			if err != nil {
+				logrus.Errorf("failed to restart replication: %v.", err)
+			}
 			continue
 		}
 
@@ -170,6 +216,10 @@ func (r *Replication) start() {
 				"ServerTime:", pkm.ServerTime,
 				"ReplyRequested:", pkm.ReplyRequested)
 
+			if pkm.ServerWALEnd > r.xlogPos {
+				r.xlogPos = pkm.ServerWALEnd
+			}
+
 			last, err := r.parent.GetCurrLSN()
 			if err == nil {
 				metrics.SetBehindLSN(last, pkm.ServerWALEnd)
@@ -188,7 +238,9 @@ func (r *Replication) start() {
 				logrus.Errorf("ParseXLogData failed: %v", err)
 				continue
 			}
-			r.currLSN = xld.WALStart + pglogrepl.LSN(len(xld.WALData))
+			if xld.WALStart > r.xlogPos {
+				r.xlogPos = xld.WALStart
+			}
 
 			logrus.Tracef("XLogData => WALStart %s ServerWALEnd %s ServerTime %s WALData:\n%s\n", xld.WALStart, xld.ServerWALEnd, xld.ServerTime, hex.Dump(xld.WALData))
 
@@ -527,11 +579,17 @@ func (r *Replication) baseMessage(rel Relation) creek.WAL {
 	return msg
 }
 
-func (r *Replication) tryReconnect(ctx context.Context) error {
-	conn, _, err := r.parent.connectSlot(ctx, r.parent.cfg.PgPublicationSlot, r.parent.cfg.PgPublicationName)
-	if err != nil {
-		return err
+func (r *Replication) tryConnect() (err error) {
+
+	operation := func() (*pgconn.PgConn, error) {
+		conn, _, err := r.parent.connectSlot(context.Background(), r.parent.cfg.PgPublicationSlot, r.parent.cfg.PgPublicationName)
+		return conn, err
 	}
-	r.conn = conn
-	return nil
+
+	notify := func(err error, timeout time.Duration) {
+		logrus.Errorf("[replication] failed to reconnect to database, retrying in %ds", int(timeout.Seconds()))
+	}
+
+	r.conn, err = backoff.RetryNotifyWithData(operation, backoff.NewExponentialBackOff(), notify)
+	return err
 }

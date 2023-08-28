@@ -3,24 +3,37 @@ package dao
 import (
 	"context"
 	"errors"
+	"github.com/cenkalti/backoff/v4"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
 
 func (db *DB) startApi() {
-	conn, err := db.pool.Acquire(db.ctx)
+
+	connect := func() (*pgxpool.Conn, error) {
+		conn, err := db.pool.Acquire(db.ctx)
+		if err != nil {
+			return nil, err
+		}
+		_, err = conn.Exec(db.ctx, "listen creek")
+		if err != nil {
+			conn.Release()
+		}
+		return conn, err
+	}
+
+	conn, err := backoff.RetryWithData(connect, backoff.NewExponentialBackOff())
 	if err != nil {
-		logrus.Errorf("failed to aquire db connection: %v", err)
+		logrus.Errorf("[listen api] failed to connect: %v", err)
 		return
 	}
-	defer conn.Release()
 
-	_, err = conn.Exec(db.ctx, "listen creek")
-	if err != nil {
-		logrus.Errorf("failed to listen to creek_consumer: %v", err)
+	notify := func(err error, timeout time.Duration) {
+		logrus.Errorf("[listen api] failed to connect to database, retrying in %ds", int(timeout.Seconds()))
 	}
-	logrus.Debug("listening for notifications on creek")
 
 	for {
 		select {
@@ -34,6 +47,13 @@ func (db *DB) startApi() {
 		}
 		if err != nil {
 			logrus.Errorf("failed while waiting to get notification for creek_consumer: %v", err)
+			if err.Error() == "conn closed" {
+				conn, err = backoff.RetryNotifyWithData(connect, backoff.NewExponentialBackOff(), notify)
+				if err != nil {
+					logrus.Errorf("[listen api] failed to connect: %v", err)
+					return
+				}
+			}
 			continue
 		}
 
