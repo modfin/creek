@@ -41,12 +41,12 @@ func Get() Config {
 		if err != nil {
 			ll = logrus.InfoLevel
 		}
-		limitHook := utils.NewRateLimitHook(60, 10, ll)
+		limitedWriter := utils.NewRateLimitedWriter(60, 10, ll)
 		prometheusHook := metrics.MustNewPrometheusHook()
 		logrus.SetLevel(ll)
 		logrus.AddHook(prometheusHook)
-		logrus.AddHook(limitHook)
-		logrus.SetOutput(io.Discard)
+		logrus.AddHook(limitedWriter) // Writes to stdout with rate limit
+		logrus.SetOutput(io.Discard)  // Discard messages
 	})
 	return cfg
 }

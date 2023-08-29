@@ -7,22 +7,22 @@ import (
 
 // Inspired by https://github.com/misho-kr/logrus-hooks/blob/master/limit.go
 
-type RateLimitHook struct {
+type RateLimitedWriter struct {
 	limiter   *rate.Limiter
 	logger    *logrus.Logger
 	discarded int
 }
 
-func NewRateLimitHook(limitPerSecond float32, burst int, level logrus.Level) *RateLimitHook {
+func NewRateLimitedWriter(limitPerSecond float32, burst int, level logrus.Level) *RateLimitedWriter {
 	l := logrus.New()
 	l.SetLevel(level)
-	return &RateLimitHook{
+	return &RateLimitedWriter{
 		limiter: rate.NewLimiter(rate.Limit(limitPerSecond), burst),
 		logger:  l,
 	}
 }
 
-func (hook *RateLimitHook) Fire(entry *logrus.Entry) error {
+func (hook *RateLimitedWriter) Fire(entry *logrus.Entry) error {
 	if !hook.limiter.Allow() {
 		hook.discarded++
 		return nil
@@ -35,6 +35,6 @@ func (hook *RateLimitHook) Fire(entry *logrus.Entry) error {
 	return nil
 }
 
-func (hook *RateLimitHook) Levels() []logrus.Level {
+func (hook *RateLimitedWriter) Levels() []logrus.Level {
 	return logrus.AllLevels
 }
