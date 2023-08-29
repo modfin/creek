@@ -9,6 +9,6 @@ import (
 type Relation struct {
 	fingerprint string
 	Msg         *pglogrepl.RelationMessage
-	Schema      pgtypeavro.Schema // Schema for all fields
-	KeySchema   pgtypeavro.Schema // Schema for key fields
+	Schema      *pgtypeavro.Record // Schema for all fields
+	KeySchema   *pgtypeavro.Record // Schema for key fields
 }

@@ -77,7 +77,57 @@ func TestInsert(t *testing.T) {
 
 	assert.Equal(t, &expected, msg.After)
 
-	stream.Close()
+}
+
+func TestUpdate(t *testing.T) {
+	EnsureStarted()
+	db := GetDBConn()
+	creekConn := GetCreekConn()
+
+	now := time.Now()
+
+	_, err := db.Query(context.Background(), "UPDATE public.other SET data='cool' WHERE id=1;")
+	assert.NoError(t, err)
+	_, err = db.Query(context.Background(), "UPDATE public.other SET id=100 WHERE id=1;")
+	assert.NoError(t, err)
+
+	stream, err := creekConn.SteamWALFrom(context.TODO(), DBname, "public.other", now, "0/0")
+	assert.NoError(t, err)
+
+	msg, err := stream.Next(context.TODO())
+	assert.NoError(t, err)
+
+	assert.Equal(t, creek.OpUpdate, msg.Op)
+	assert.Equal(t, &map[string]any{"id": 1}, msg.Before)
+	assert.Equal(t, &map[string]any{"id": 1, "data": "cool"}, msg.After)
+
+	msg, err = stream.Next(context.TODO())
+	assert.NoError(t, err)
+
+	assert.Equal(t, creek.OpUpdatePk, msg.Op)
+	assert.Equal(t, &map[string]any{"id": 1}, msg.Before)
+	assert.Equal(t, &map[string]any{"id": 100, "data": "cool"}, msg.After)
+}
+
+func TestDelete(t *testing.T) {
+	EnsureStarted()
+	db := GetDBConn()
+	creekConn := GetCreekConn()
+
+	now := time.Now()
+	_, err := db.Query(context.Background(), "DELETE FROM public.other WHERE id=100;")
+	assert.NoError(t, err)
+
+	stream, err := creekConn.SteamWALFrom(context.TODO(), DBname, "public.other", now, "0/0")
+	assert.NoError(t, err)
+
+	msg, err := stream.Next(context.TODO())
+	assert.NoError(t, err)
+
+	var nilMap *map[string]any = nil
+	assert.Equal(t, creek.OpDelete, msg.Op)
+	assert.Equal(t, &map[string]any{"id": 100}, msg.Before)
+	assert.Equal(t, nilMap, msg.After)
 }
 
 func TestSnap(t *testing.T) {
@@ -225,7 +275,7 @@ func TestSchema(t *testing.T) {
             "type": [
                 "null",
                 {
-                    "name": "types",
+                    "name": "before.types",
                     "type": "record",
                     "fields": [
                         {
@@ -246,7 +296,7 @@ func TestSchema(t *testing.T) {
             "type": [
                 "null",
                 {
-                    "name": "types",
+                    "name": "after.types",
                     "type": "record",
                     "fields": [
                         {
@@ -294,7 +344,7 @@ func TestSchema(t *testing.T) {
                                     "logicalType": "date"
                                 },
                                 {
-                                    "name": "infinity_modifier",
+                                    "name": "after.infinity_modifier",
                                     "type": "enum",
                                     "symbols": [
                                         "infinity",
@@ -386,7 +436,7 @@ func TestSchema(t *testing.T) {
                                     "logicalType": "time-micros"
                                 },
                                 {
-                                    "name": "infinity_modifier",
+                                    "name": "after.infinity_modifier",
                                     "type": "enum",
                                     "symbols": [
                                         "infinity",
@@ -406,7 +456,7 @@ func TestSchema(t *testing.T) {
                                     "logicalType": "timestamp-micros"
                                 },
                                 {
-                                    "name": "infinity_modifier",
+                                    "name": "after.infinity_modifier",
                                     "type": "enum",
                                     "symbols": [
                                         "infinity",
@@ -426,7 +476,7 @@ func TestSchema(t *testing.T) {
                                     "logicalType": "timestamp-micros"
                                 },
                                 {
-                                    "name": "infinity_modifier",
+                                    "name": "after.infinity_modifier",
                                     "type": "enum",
                                     "symbols": [
                                         "infinity",
@@ -520,7 +570,7 @@ func TestSchema(t *testing.T) {
                                             "logicalType": "date"
                                         },
                                         {
-                                            "name": "infinity_modifier",
+                                            "name": "after.infinity_modifier",
                                             "type": "enum",
                                             "symbols": [
                                                 "infinity",
@@ -641,7 +691,7 @@ func TestSchema(t *testing.T) {
                                             "logicalType": "time-micros"
                                         },
                                         {
-                                            "name": "infinity_modifier",
+                                            "name": "after.infinity_modifier",
                                             "type": "enum",
                                             "symbols": [
                                                 "infinity",
@@ -666,7 +716,7 @@ func TestSchema(t *testing.T) {
                                             "logicalType": "timestamp-micros"
                                         },
                                         {
-                                            "name": "infinity_modifier",
+                                            "name": "after.infinity_modifier",
                                             "type": "enum",
                                             "symbols": [
                                                 "infinity",
@@ -691,7 +741,7 @@ func TestSchema(t *testing.T) {
                                             "logicalType": "timestamp-micros"
                                         },
                                         {
-                                            "name": "infinity_modifier",
+                                            "name": "after.infinity_modifier",
                                             "type": "enum",
                                             "symbols": [
                                                 "infinity",

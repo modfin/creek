@@ -6,7 +6,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/docker/docker v24.0.5+incompatible
 	github.com/docker/go-connections v0.4.0
-	github.com/hamba/avro/v2 v2.14.1
+	github.com/hamba/avro/v2 v2.15.0
 	github.com/hashicorp/golang-lru/v2 v2.0.6
 	github.com/jackc/pglogrepl v0.0.0-20230826184802-9ed16cb201f6
 	github.com/jackc/pgx/v5 v5.4.3
