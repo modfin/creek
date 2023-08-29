@@ -76,3 +76,46 @@ func IncRead(streamType creek.StreamType, op string, source string) {
 			"creek_producer_pg_op": op}).
 		Inc()
 }
+
+// Inspired by https://github.com/weaveworks/promrus/blob/master/promrus.go
+
+type PrometheusHook struct {
+	counterVec *prometheus.CounterVec
+}
+
+var supportedLevels = []logrus.Level{logrus.DebugLevel, logrus.InfoLevel, logrus.WarnLevel, logrus.ErrorLevel}
+
+func NewPrometheusHook() (*PrometheusHook, error) {
+	counterVec := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "log_messages_total",
+		Help: "Total number of log messages.",
+	}, []string{"level"})
+	// Initialise counters for all supported levels:
+	for _, level := range supportedLevels {
+		counterVec.WithLabelValues(level.String())
+	}
+	err := prometheus.Register(counterVec)
+	if err != nil {
+		return nil, err
+	}
+	return &PrometheusHook{
+		counterVec: counterVec,
+	}, nil
+}
+
+func MustNewPrometheusHook() *PrometheusHook {
+	hook, err := NewPrometheusHook()
+	if err != nil {
+		panic(err)
+	}
+	return hook
+}
+
+func (hook *PrometheusHook) Fire(entry *logrus.Entry) error {
+	hook.counterVec.WithLabelValues(entry.Level.String()).Inc()
+	return nil
+}
+
+func (hook *PrometheusHook) Levels() []logrus.Level {
+	return supportedLevels
+}

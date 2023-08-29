@@ -60,7 +60,7 @@ func (db *DB) startApi() {
 		if err != nil {
 			logrus.Errorf("failed while waiting to get notification for creek_consumer: %v", err)
 			if err.Error() == "conn closed" {
-				conn, err = tryConnect()
+				conn, err = tryConnect() // Blocks until new connection
 				if err != nil {
 					logrus.Errorf("[listen api] failed to reconnect: %v", err)
 					return

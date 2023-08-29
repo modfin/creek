@@ -1,6 +1,9 @@
 package config
 
 import (
+	"github.com/modfin/creek/internal/metrics"
+	"github.com/modfin/creek/internal/utils"
+	"io"
 	"sync"
 	"time"
 
@@ -38,7 +41,12 @@ func Get() Config {
 		if err != nil {
 			ll = logrus.InfoLevel
 		}
+		limitHook := utils.NewRateLimitHook(60, 10, ll)
+		prometheusHook := metrics.MustNewPrometheusHook()
 		logrus.SetLevel(ll)
+		logrus.AddHook(prometheusHook)
+		logrus.AddHook(limitHook)
+		logrus.SetOutput(io.Discard)
 	})
 	return cfg
 }
