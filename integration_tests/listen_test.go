@@ -435,14 +435,7 @@ func TestSchema(t *testing.T) {
                                     "type": "long",
                                     "logicalType": "time-micros"
                                 },
-                                {
-                                    "name": "after.infinity_modifier",
-                                    "type": "enum",
-                                    "symbols": [
-                                        "infinity",
-                                        "negative_infinity_ca5991f51367e3e4"
-                                    ]
-                                }
+                                "after.infinity_modifier"
                             ],
                             "pgKey": false,
                             "pgType": "time"
@@ -455,14 +448,7 @@ func TestSchema(t *testing.T) {
                                     "type": "long",
                                     "logicalType": "timestamp-micros"
                                 },
-                                {
-                                    "name": "after.infinity_modifier",
-                                    "type": "enum",
-                                    "symbols": [
-                                        "infinity",
-                                        "negative_infinity_ca5991f51367e3e4"
-                                    ]
-                                }
+                                "after.infinity_modifier"
                             ],
                             "pgKey": false,
                             "pgType": "timestamp"
@@ -475,14 +461,7 @@ func TestSchema(t *testing.T) {
                                     "type": "long",
                                     "logicalType": "timestamp-micros"
                                 },
-                                {
-                                    "name": "after.infinity_modifier",
-                                    "type": "enum",
-                                    "symbols": [
-                                        "infinity",
-                                        "negative_infinity_ca5991f51367e3e4"
-                                    ]
-                                }
+                               	"after.infinity_modifier"
                             ],
                             "pgKey": false,
                             "pgType": "timestamptz"
@@ -569,14 +548,7 @@ func TestSchema(t *testing.T) {
                                             "type": "int",
                                             "logicalType": "date"
                                         },
-                                        {
-                                            "name": "after.infinity_modifier",
-                                            "type": "enum",
-                                            "symbols": [
-                                                "infinity",
-                                                "negative_infinity_ca5991f51367e3e4"
-                                            ]
-                                        }
+                                        "after.infinity_modifier"
                                     ]
                                 }
                             ],
@@ -690,14 +662,7 @@ func TestSchema(t *testing.T) {
                                             "type": "long",
                                             "logicalType": "time-micros"
                                         },
-                                        {
-                                            "name": "after.infinity_modifier",
-                                            "type": "enum",
-                                            "symbols": [
-                                                "infinity",
-                                                "negative_infinity_ca5991f51367e3e4"
-                                            ]
-                                        }
+                                        "after.infinity_modifier"
                                     ]
                                 }
                             ],
@@ -715,14 +680,7 @@ func TestSchema(t *testing.T) {
                                             "type": "long",
                                             "logicalType": "timestamp-micros"
                                         },
-                                        {
-                                            "name": "after.infinity_modifier",
-                                            "type": "enum",
-                                            "symbols": [
-                                                "infinity",
-                                                "negative_infinity_ca5991f51367e3e4"
-                                            ]
-                                        }
+                                        "after.infinity_modifier"
                                     ]
                                 }
                             ],
@@ -740,14 +698,7 @@ func TestSchema(t *testing.T) {
                                             "type": "long",
                                             "logicalType": "timestamp-micros"
                                         },
-                                        {
-                                            "name": "after.infinity_modifier",
-                                            "type": "enum",
-                                            "symbols": [
-                                                "infinity",
-                                                "negative_infinity_ca5991f51367e3e4"
-                                            ]
-                                        }
+                                        "after.infinity_modifier"
                                     ]
                                 }
                             ],

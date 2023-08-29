@@ -46,6 +46,7 @@ func (db *DB) startApi() {
 		logrus.Errorf("[listen api] failed to connect: %v", err)
 		return
 	}
+	defer conn.Release()
 
 	for {
 		select {
@@ -58,7 +59,7 @@ func (db *DB) startApi() {
 			continue
 		}
 		if err != nil {
-			logrus.Errorf("failed while waiting to get notification for creek_consumer: %v", err)
+			logrus.Errorf("failed while waiting to get notification for _creek: %v", err)
 			if err.Error() == "conn closed" {
 				conn, err = tryConnect() // Blocks until new connection
 				if err != nil {
