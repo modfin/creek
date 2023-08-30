@@ -84,3 +84,8 @@ func GetCreekConn() *creek.Conn {
 
 	return conn
 }
+
+func TimeoutContext(timeout time.Duration) context.Context {
+	ctx, _ := context.WithTimeout(context.Background(), timeout)
+	return ctx
+}

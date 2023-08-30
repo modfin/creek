@@ -87,7 +87,7 @@ func startNats(ctx context.Context, dockerNetworkName string, wg *sync.WaitGroup
 }
 
 func GetNATSURL() string {
-	p, _ := natsContainer.MappedPort(context.TODO(), nat.Port("4222"))
+	p, _ := natsContainer.MappedPort(TimeoutContext(time.Second*1), nat.Port("4222"))
 	return "nats://127.0.0.1:" + p.Port()
 }
 

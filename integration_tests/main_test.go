@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/modfin/creek/integration_tests/env"
 
@@ -18,7 +19,7 @@ func TestMain(m *testing.M) {
 	testCtx, cancel = context.WithCancel(context.Background())
 
 	// Setup test environment, Docker network and Docker containers
-	if err := setupTestEnvironment(context.Background()); err != nil {
+	if err := setupTestEnvironment(TimeoutContext(time.Second * 20)); err != nil {
 		os.Exit(1)
 	}
 
@@ -31,7 +32,7 @@ func TestMain(m *testing.M) {
 	cancel()
 
 	// Shut down test containers
-	shutdownTestContainers(context.Background())
+	shutdownTestContainers(TimeoutContext(time.Second * 10))
 	os.Exit(exitCode)
 }
 

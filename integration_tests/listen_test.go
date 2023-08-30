@@ -29,10 +29,10 @@ func TestInsert(t *testing.T) {
 	_, err := db.Query(context.Background(), "INSERT INTO public.other VALUES (1, 'test');")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.SteamWAL(context.TODO(), DBname, "public.other")
+	stream, err := creekConn.SteamWAL(TimeoutContext(time.Second*5), DBname, "public.other")
 	assert.NoError(t, err)
 
-	msg, err := stream.Next(context.TODO())
+	msg, err := stream.Next(TimeoutContext(time.Second))
 	assert.NoError(t, err)
 
 	assert.Greater(t, msg.Source.TxAt, time.Time{})
@@ -59,10 +59,10 @@ func TestInsert(t *testing.T) {
 	_, err = db.Query(context.Background(), "INSERT INTO public.other VALUES (2, 'new stuff');")
 	assert.NoError(t, err)
 
-	stream, err = creekConn.SteamWALFrom(context.TODO(), DBname, "public.other", time.Time{}, lsn)
+	stream, err = creekConn.SteamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", time.Time{}, lsn)
 	assert.NoError(t, err)
 
-	msg, err = stream.Next(context.TODO())
+	msg, err = stream.Next(TimeoutContext(time.Second))
 	assert.NoError(t, err)
 
 	assert.Greater(t, msg.SentAt, ts)
@@ -91,17 +91,17 @@ func TestUpdate(t *testing.T) {
 	_, err = db.Query(context.Background(), "UPDATE public.other SET id=100 WHERE id=1;")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.SteamWALFrom(context.TODO(), DBname, "public.other", now, "0/0")
+	stream, err := creekConn.SteamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", now, "0/0")
 	assert.NoError(t, err)
 
-	msg, err := stream.Next(context.TODO())
+	msg, err := stream.Next(TimeoutContext(time.Second))
 	assert.NoError(t, err)
 
 	assert.Equal(t, creek.OpUpdate, msg.Op)
 	assert.Equal(t, &map[string]any{"id": 1}, msg.Before)
 	assert.Equal(t, &map[string]any{"id": 1, "data": "cool"}, msg.After)
 
-	msg, err = stream.Next(context.TODO())
+	msg, err = stream.Next(TimeoutContext(time.Second))
 	assert.NoError(t, err)
 
 	assert.Equal(t, creek.OpUpdatePk, msg.Op)
@@ -118,10 +118,10 @@ func TestDelete(t *testing.T) {
 	_, err := db.Query(context.Background(), "DELETE FROM public.other WHERE id=100;")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.SteamWALFrom(context.TODO(), DBname, "public.other", now, "0/0")
+	stream, err := creekConn.SteamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", now, "0/0")
 	assert.NoError(t, err)
 
-	msg, err := stream.Next(context.TODO())
+	msg, err := stream.Next(TimeoutContext(time.Second))
 	assert.NoError(t, err)
 
 	var nilMap *map[string]any = nil
@@ -135,7 +135,7 @@ func TestSnap(t *testing.T) {
 	//db := GetDBConn()
 	creekConn := GetCreekConn()
 
-	reader, err := creekConn.Snapshot(context.TODO(), DBname, "public.types_data")
+	reader, err := creekConn.Snapshot(TimeoutContext(time.Second*5), DBname, "public.types_data")
 	assert.NoError(t, err)
 
 	i := 0
@@ -145,11 +145,11 @@ func TestSnap(t *testing.T) {
 
 	assert.Equal(t, 1000, i)
 
-	data, err := creekConn.ListSnapshots(context.TODO(), DBname, "public.types_data")
+	data, err := creekConn.ListSnapshots(TimeoutContext(time.Second), DBname, "public.types_data")
 	assert.NoError(t, err)
 
 	// Should return the same as above
-	reader, err = creekConn.GetSnapshot(context.TODO(), data[0].Name)
+	reader, err = creekConn.GetSnapshot(TimeoutContext(time.Second*5), data[0].Name)
 	assert.NoError(t, err)
 
 	i = 0
@@ -182,11 +182,10 @@ VALUES (true, 'a', 'hi', 'hello', '2023-01-23', 0.23, 12.32, 123, 231, 123123, '
 	_, err := db.Query(context.Background(), q)
 	assert.NoError(t, err)
 
-	stream, err := creekConn.SteamWAL(context.TODO(), DBname, "public.types")
+	stream, err := creekConn.SteamWAL(TimeoutContext(time.Second*5), DBname, "public.types")
 	assert.NoError(t, err)
 
-	nextCtx, _ := context.WithTimeout(context.Background(), time.Second)
-	_, err = stream.Next(nextCtx)
+	_, err = stream.Next(TimeoutContext(time.Second))
 	assert.NoError(t, err)
 
 }
@@ -772,17 +771,17 @@ func TestPartitions(t *testing.T) {
 	_, err := db.Query(context.Background(), "INSERT INTO public.prices VALUES (1, 43.01, '2022-09-13'), (2, 16.98, '2023-09-13');")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.SteamWAL(context.TODO(), DBname, "public.prices")
+	stream, err := creekConn.SteamWAL(TimeoutContext(time.Second*5), DBname, "public.prices")
 	assert.NoError(t, err)
 
-	msg, err := stream.Next(context.TODO())
+	msg, err := stream.Next(TimeoutContext(time.Second))
 	assert.NoError(t, err)
 
 	assert.Equal(t, DBname, msg.Source.DB)
 	assert.Equal(t, "public", msg.Source.Schema)
 	assert.Equal(t, "prices", msg.Source.Table)
 
-	msg, err = stream.Next(context.TODO())
+	msg, err = stream.Next(TimeoutContext(time.Second))
 	assert.NoError(t, err)
 	assert.Equal(t, "public", msg.Source.Schema)
 	assert.Equal(t, "prices", msg.Source.Table)
