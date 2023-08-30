@@ -115,7 +115,7 @@ func TestDelete(t *testing.T) {
 	creekConn := GetCreekConn()
 
 	now := time.Now()
-	_, err := db.Query(context.Background(), "DELETE FROM public.other WHERE id=100;")
+	_, err := db.Query(TimeoutContext(time.Second), "DELETE FROM public.other WHERE id=100;")
 	assert.NoError(t, err)
 
 	stream, err := creekConn.SteamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", now, "0/0")

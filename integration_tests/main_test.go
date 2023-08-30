@@ -16,7 +16,7 @@ const testNetName = "creek-db-integration_tests-net"
 
 func TestMain(m *testing.M) {
 	var cancel context.CancelFunc
-	testCtx, cancel = context.WithTimeout(context.Background(), time.Minute*5)
+	testCtx, cancel = context.WithTimeout(context.Background(), time.Minute)
 
 	// Setup test environment, Docker network and Docker containers
 	if err := setupTestEnvironment(testCtx); err != nil {
