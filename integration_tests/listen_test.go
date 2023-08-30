@@ -1,7 +1,6 @@
 package integration_tests
 
 import (
-	"context"
 	"encoding/base64"
 	"testing"
 	"time"
@@ -16,7 +15,7 @@ func TestSetup(t *testing.T) {
 	db := GetDBConn()
 
 	var numRows int
-	err := db.QueryRow(context.Background(), "SELECT count(*) FROM public.types_data").Scan(&numRows)
+	err := db.QueryRow(TimeoutContext(time.Second), "SELECT count(*) FROM public.types_data").Scan(&numRows)
 	assert.NoError(t, err)
 	assert.Equal(t, 1000, numRows)
 }
@@ -26,7 +25,7 @@ func TestInsert(t *testing.T) {
 	db := GetDBConn()
 	creekConn := GetCreekConn()
 
-	_, err := db.Query(context.Background(), "INSERT INTO public.other VALUES (1, 'test');")
+	_, err := db.Exec(TimeoutContext(time.Second), "INSERT INTO public.other VALUES (1, 'test');")
 	assert.NoError(t, err)
 
 	stream, err := creekConn.SteamWAL(TimeoutContext(time.Second*5), DBname, "public.other")
@@ -56,7 +55,7 @@ func TestInsert(t *testing.T) {
 	ts := msg.SentAt
 	lsn := msg.Source.LSN
 
-	_, err = db.Query(context.Background(), "INSERT INTO public.other VALUES (2, 'new stuff');")
+	_, err = db.Exec(TimeoutContext(time.Second), "INSERT INTO public.other VALUES (2, 'new stuff');")
 	assert.NoError(t, err)
 
 	stream, err = creekConn.SteamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", time.Time{}, lsn)
@@ -86,9 +85,9 @@ func TestUpdate(t *testing.T) {
 
 	now := time.Now()
 
-	_, err := db.Query(context.Background(), "UPDATE public.other SET data='cool' WHERE id=1;")
+	_, err := db.Exec(TimeoutContext(time.Second), "UPDATE public.other SET data='cool' WHERE id=1;")
 	assert.NoError(t, err)
-	_, err = db.Query(context.Background(), "UPDATE public.other SET id=100 WHERE id=1;")
+	_, err = db.Exec(TimeoutContext(time.Second), "UPDATE public.other SET id=100 WHERE id=1;")
 	assert.NoError(t, err)
 
 	stream, err := creekConn.SteamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", now, "0/0")
@@ -115,7 +114,7 @@ func TestDelete(t *testing.T) {
 	creekConn := GetCreekConn()
 
 	now := time.Now()
-	_, err := db.Query(TimeoutContext(time.Second), "DELETE FROM public.other WHERE id=100;")
+	_, err := db.Exec(TimeoutContext(time.Second), "DELETE FROM public.other WHERE id=100;")
 	assert.NoError(t, err)
 
 	stream, err := creekConn.SteamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", now, "0/0")
@@ -179,7 +178,7 @@ VALUES (true, 'a', 'hi', 'hello', '2023-01-23', 0.23, 12.32, 123, 231, 123123, '
         '{}', '{text}', '{12:30, 13:20}', '{now()}', '{now(), now()}', '{46145d05-8bc7-403b-8098-1baf99e97b56}', '{231.112}')
         `
 
-	_, err := db.Query(context.Background(), q)
+	_, err := db.Exec(TimeoutContext(time.Second), q)
 	assert.NoError(t, err)
 
 	stream, err := creekConn.SteamWAL(TimeoutContext(time.Second*5), DBname, "public.types")
@@ -742,9 +741,8 @@ func TestSchema(t *testing.T) {
         }
     ]
 }`
-	ctx, _ := context.WithTimeout(context.Background(), time.Second*2)
 
-	schema, err := creekConn.GetLastSchema(ctx, DBname, "public.types")
+	schema, err := creekConn.GetLastSchema(TimeoutContext(time.Second), DBname, "public.types")
 	assert.NoError(t, err)
 
 	assert.JSONEq(t, expectedJSON, schema.Schema)
@@ -758,7 +756,7 @@ func TestSchema(t *testing.T) {
 
 	assert.Equal(t, encoded, schema.Fingerprint)
 
-	schema, err = creekConn.GetSchema(ctx, encoded)
+	schema, err = creekConn.GetSchema(TimeoutContext(time.Second), encoded)
 	assert.NoError(t, err)
 	assert.JSONEq(t, expectedJSON, schema.Schema)
 }
@@ -768,7 +766,7 @@ func TestPartitions(t *testing.T) {
 	db := GetDBConn()
 	creekConn := GetCreekConn()
 
-	_, err := db.Query(context.Background(), "INSERT INTO public.prices VALUES (1, 43.01, '2022-09-13'), (2, 16.98, '2023-09-13');")
+	_, err := db.Exec(TimeoutContext(time.Second), "INSERT INTO public.prices VALUES (1, 43.01, '2022-09-13'), (2, 16.98, '2023-09-13');")
 	assert.NoError(t, err)
 
 	stream, err := creekConn.SteamWAL(TimeoutContext(time.Second*5), DBname, "public.prices")

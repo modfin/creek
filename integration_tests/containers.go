@@ -128,17 +128,23 @@ func startPostgres(ctx context.Context, dockerNetworkName string, wg *sync.WaitG
 
 func shutdownTestContainers(ctx context.Context) {
 	// Insert small delay here so that we have time to flush container logs before we shut down the containers
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Second * 1)
 
 	// time.Sleep(time.Hour) // Enable to keep containers alive while debugging
 
 	log.Print("Shutting down containers..")
 	var wg sync.WaitGroup
-	terminate := func(container interface{ Terminate(ctx context.Context) }) {
+	terminate := func(container interface {
+		Terminate(ctx context.Context) error
+	}) {
 		defer wg.Done()
-		container.Terminate(ctx)
+		err := container.Terminate(ctx)
+		if err != nil {
+			log.Printf("failed to terminate container: %v", err)
+		}
 	}
-	wg.Add(1)
+	wg.Add(2)
 	go terminate(postgres)
+	go terminate(natsContainer)
 	wg.Wait()
 }

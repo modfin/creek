@@ -15,11 +15,12 @@ import (
 const testNetName = "creek-db-integration_tests-net"
 
 func TestMain(m *testing.M) {
-	var cancel context.CancelFunc
-	testCtx, cancel = context.WithTimeout(context.Background(), time.Minute)
+	var testCancel context.CancelFunc
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	testCtx, testCancel = context.WithTimeout(context.Background(), time.Minute)
 
 	// Setup test environment, Docker network and Docker containers
-	if err := setupTestEnvironment(testCtx); err != nil {
+	if err := setupTestEnvironment(ctx); err != nil {
 		os.Exit(1)
 	}
 
@@ -29,10 +30,11 @@ func TestMain(m *testing.M) {
 
 	// Run tests...
 	exitCode := m.Run()
-	cancel()
+	testCancel()
 
 	// Shut down test containers
-	shutdownTestContainers(TimeoutContext(time.Second * 10))
+	shutdownTestContainers(ctx)
+	cancel()
 	os.Exit(exitCode)
 }
 

@@ -250,15 +250,10 @@ func (c *Container) Stop(ctx context.Context) error {
 	return c.C.Terminate(ctx)
 }
 
-func (c *Container) Terminate(ctx context.Context) {
-	log.Println("postgres-test: Stopping log producer")
-	_ = c.C.StopLogProducer()
-
+func (c *Container) Terminate(ctx context.Context) error {
 	log.Println("postgres-test: Terminating container")
 	err := c.C.Terminate(ctx)
-	if err != nil {
-		log.Printf("Error while terminating postgres-test, error: %v", err)
-	}
+	return err
 }
 
 func (c *Container) RestartInCurrentCtx() error {
