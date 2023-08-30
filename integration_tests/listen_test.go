@@ -784,3 +784,40 @@ func TestPartitions(t *testing.T) {
 	assert.Equal(t, "public", msg.Source.Schema)
 	assert.Equal(t, "prices", msg.Source.Table)
 }
+
+func TestRestart(t *testing.T) {
+	EnsureStarted()
+	db := GetDBConn()
+	creekConn := GetCreekConn()
+
+	msgCounter.Reset()
+
+	// Disable network proxy to simulate DB disconnect
+	err := DisableProxi()
+	assert.NoError(t, err)
+
+	time.Sleep(time.Second * 3)
+
+	// Reenable network proxy to simulate DB reconnect
+	err = EnableProxi()
+	assert.NoError(t, err)
+
+	time.Sleep(time.Second * 3)
+
+	now := time.Now()
+	_, err = db.Exec(TimeoutContext(time.Second), "INSERT INTO public.other VALUES (999, 'reconnect');")
+	assert.NoError(t, err)
+
+	stream, err := creekConn.SteamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", now, "0/0")
+	assert.NoError(t, err)
+
+	msg, err := stream.Next(TimeoutContext(time.Second * 2))
+	assert.NoError(t, err)
+
+	logMsgs := msgCounter.Msgs()
+	assert.Greater(t, logMsgs, 0)
+	assert.Less(t, logMsgs, 100)
+
+	assert.Equal(t, creek.OpInsert, msg.Op)
+	assert.Equal(t, &map[string]any{"id": 999, "data": "reconnect"}, msg.After)
+}

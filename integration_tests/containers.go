@@ -2,28 +2,40 @@ package integration_tests
 
 import (
 	"context"
+	"fmt"
+	toxiproxy "github.com/Shopify/toxiproxy/v2/client"
 	"github.com/docker/go-connections/nat"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modfin/creek/integration_tests/dbc"
+	"github.com/modfin/creek/integration_tests/proxy"
+	"github.com/sirupsen/logrus"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"log"
+	"regexp"
 	"sync"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/sirupsen/logrus"
 )
 
 var (
 	postgres      *dbc.Container
 	natsContainer testcontainers.Container
 	testsStarted  time.Time
+	toxiProxy     *proxy.Container
+	dbProxi       *toxiproxy.Proxy
 )
 
 const DBname = "test_db"
 
 func startTestContainers(ctx context.Context, dockerNetworkName string) error {
 	var err error
+
+	// Start toxiproxy first
+	toxiProxy, err = proxy.StartContainer(ctx, dockerNetworkName)
+	if err != nil {
+		logrus.Errorf("Failed to create toxiproxy container: %v", err)
+		return err
+	}
 
 	postgres, err = dbc.New("./containers/", "Dockerfile.postgres")
 	if err != nil {
@@ -34,13 +46,27 @@ func startTestContainers(ctx context.Context, dockerNetworkName string) error {
 	var startError bool
 	var wg sync.WaitGroup
 
-	wg.Add(1)
+	wg.Add(2)
 	go startPostgres(ctx, dockerNetworkName, &wg, &startError)
-
-	wg.Add(1)
 	go startNats(ctx, dockerNetworkName, &wg, &startError)
-
 	wg.Wait()
+
+	ip, err := postgres.C.ContainerIP(ctx)
+	if err != nil {
+		return err
+	}
+
+	toxiClient := toxiproxy.NewClient(toxiProxy.URI)
+	dbProxi, err = toxiClient.CreateProxy("postgres", "0.0.0.0:8666", fmt.Sprintf("%s:5432", ip))
+	if err != nil {
+		logrus.Errorf("Failed to create populate proxies: %v", err)
+		return err
+	}
+	err = dbProxi.Enable()
+	if err != nil {
+		return err
+	}
+
 	if startError {
 		log.Fatal("There were errors while starting containers, check log output for more information. Test aborted!")
 	}
@@ -92,7 +118,17 @@ func GetNATSURL() string {
 }
 
 func GetDBURL() string {
-	return postgres.DBURL()
+	dbUri := postgres.DBURL()
+	re := regexp.MustCompile(`\d+`)
+	return re.ReplaceAllString(dbUri, toxiProxy.DBPort)
+}
+
+func EnableProxi() error {
+	return dbProxi.Enable()
+}
+
+func DisableProxi() error {
+	return dbProxi.Disable()
 }
 
 func GetDBConn() *pgxpool.Pool {
@@ -143,8 +179,9 @@ func shutdownTestContainers(ctx context.Context) {
 			log.Printf("failed to terminate container: %v", err)
 		}
 	}
-	wg.Add(2)
+	wg.Add(3)
 	go terminate(postgres)
 	go terminate(natsContainer)
+	go terminate(toxiProxy)
 	wg.Wait()
 }

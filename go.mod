@@ -3,6 +3,7 @@ module github.com/modfin/creek
 go 1.20
 
 require (
+	github.com/Shopify/toxiproxy/v2 v2.6.0
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/docker/docker v24.0.5+incompatible
 	github.com/docker/go-connections v0.4.0

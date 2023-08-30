@@ -17,6 +17,29 @@ var conn *creek.Conn
 var connOnce sync.Once
 var testCtx context.Context
 
+type LogMsgCounter struct {
+	msgs int
+}
+
+func (l *LogMsgCounter) Levels() []logrus.Level {
+	return logrus.AllLevels
+}
+
+func (l *LogMsgCounter) Fire(*logrus.Entry) error {
+	l.msgs++
+	return nil
+}
+
+func (l *LogMsgCounter) Reset() {
+	l.msgs = 0
+}
+
+func (l *LogMsgCounter) Msgs() int {
+	return l.msgs
+}
+
+var msgCounter *LogMsgCounter
+
 func GetConfig() config.Config {
 
 	return config.Config{
@@ -37,6 +60,10 @@ func GetConfig() config.Config {
 func EnsureStarted() {
 	start.Do(func() {
 		cfg := GetConfig()
+
+		msgCounter = &LogMsgCounter{msgs: 0}
+
+		logrus.AddHook(msgCounter)
 
 		db, err := dao.New(testCtx, cfg)
 		if err != nil {
