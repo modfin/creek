@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/modfin/creek/internal/metrics"
 	"strings"
 
 	"github.com/jackc/pglogrepl"
@@ -92,6 +93,7 @@ returns void language plpgsql as $$
 
     begin
 		EXECUTE 'ALTER PUBLICATION ' || quote_ident(pub) || ' DROP TABLE ' || _tbl;
+		execute pg_notify('creek', 'REMOVE ' || _tbl);
     end;
     $$;
 
@@ -115,13 +117,17 @@ returns void language plpgsql as $$
 }
 
 func (db *DB) ensurePublication(name string, tables []string) error {
-	existing, err := db.pool.Query(db.ctx, "SELECT oid FROM pg_catalog.pg_publication WHERE pubname = $1", name)
+	var exists bool
+	var numSubscribed int
+	err := db.pool.QueryRow(db.ctx, `
+SELECT count(pub) > 0 AS exists, count(pub_rel) FROM pg_catalog.pg_publication pub
+                LEFT JOIN pg_catalog.pg_publication_rel pub_rel ON pub.oid = pub_rel.prpubid
+                WHERE pub.pubname = $1`, name).Scan(&exists, &numSubscribed)
 	if err != nil {
 		return fmt.Errorf("could not query for existing publications: %w", err)
 	}
-	if existing.Next() {
-		// The publication already exists, we don't need to do anything
-		//_, err = db.pool.Exec(db.ctx, fmt.Sprintf("ALTER PUBLICATION %s SET TABLE %v", name, strings.Join(tables, ",")))
+	if exists {
+		metrics.SetSubscribedTables(numSubscribed)
 		return nil
 	}
 
@@ -131,6 +137,7 @@ func (db *DB) ensurePublication(name string, tables []string) error {
 	if err != nil {
 		return fmt.Errorf("create publication error: %w", err)
 	}
+	metrics.SetSubscribedTables(len(tables))
 	logrus.Debugf("create publication %s", name)
 
 	return nil

@@ -19,6 +19,11 @@ var pgReads = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Help: "total numbers of row into postgres from creek streams",
 }, []string{"creek_stream_type", "creek_producer_pg_op", "creek_pg_source"})
 
+var walLsn = prometheus.NewGauge(prometheus.GaugeOpts{
+	Name: "creek_producer_lsn",
+	Help: "current lsn, in bytes",
+})
+
 var behindTime = prometheus.NewGauge(prometheus.GaugeOpts{
 	Name: "creek_producer_pg_behind_time",
 	Help: "total time between postgres wal event and processing in milliseconds",
@@ -29,10 +34,17 @@ var behindBytes = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help: "total unprocessed bytes in wal log",
 })
 
+var subscribedTables = prometheus.NewGauge(prometheus.GaugeOpts{
+	Name: "creek_producer_wal_subscriptions",
+	Help: "number of tables subscribed to",
+})
+
 func init() {
 	prometheus.MustRegister(pgReads)
+	prometheus.MustRegister(walLsn)
 	prometheus.MustRegister(behindTime)
 	prometheus.MustRegister(behindBytes)
+	prometheus.MustRegister(subscribedTables)
 }
 
 func Start(ctx context.Context, port int) {
@@ -68,6 +80,10 @@ func SetBehindTime(duration time.Duration) {
 	behindTime.Set(float64(duration.Milliseconds()))
 }
 
+func SetWalLSN(lsn pglogrepl.LSN) {
+	walLsn.Set(float64(lsn))
+}
+
 func IncRead(streamType creek.StreamType, op string, source string) {
 	pgReads.
 		With(map[string]string{
@@ -75,6 +91,18 @@ func IncRead(streamType creek.StreamType, op string, source string) {
 			"creek_pg_source":      source,
 			"creek_producer_pg_op": op}).
 		Inc()
+}
+
+func SetSubscribedTables(num int) {
+	subscribedTables.Set(float64(num))
+}
+
+func IncSubscribedTables() {
+	subscribedTables.Inc()
+}
+
+func DecSubscribedTables() {
+	subscribedTables.Dec()
 }
 
 // Inspired by https://github.com/weaveworks/promrus/blob/master/promrus.go
@@ -89,10 +117,10 @@ func NewPrometheusHook() (*PrometheusHook, error) {
 	counterVec := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "log_messages_total",
 		Help: "Total number of log messages.",
-	}, []string{"level"})
+	}, []string{"level", "application"})
 	// Initialise counters for all supported levels:
 	for _, level := range supportedLevels {
-		counterVec.WithLabelValues(level.String())
+		counterVec.WithLabelValues(level.String(), "creek_producer")
 	}
 	err := prometheus.Register(counterVec)
 	if err != nil {
@@ -112,7 +140,7 @@ func MustNewPrometheusHook() *PrometheusHook {
 }
 
 func (hook *PrometheusHook) Fire(entry *logrus.Entry) error {
-	hook.counterVec.WithLabelValues(entry.Level.String()).Inc()
+	hook.counterVec.WithLabelValues(entry.Level.String(), "creek_producer").Inc()
 	return nil
 }
 

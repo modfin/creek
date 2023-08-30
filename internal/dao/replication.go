@@ -225,6 +225,7 @@ func (r *Replication) start() {
 				metrics.SetBehindLSN(last, pkm.ServerWALEnd)
 			}
 			metrics.SetBehindTime(time.Now().Sub(pkm.ServerTime))
+			metrics.SetWalLSN(pkm.ServerWALEnd)
 
 			if pkm.ReplyRequested {
 				timeout = time.Time{}
@@ -243,6 +244,7 @@ func (r *Replication) start() {
 			}
 
 			logrus.Tracef("XLogData => WALStart %s ServerWALEnd %s ServerTime %s WALData:\n%s\n", xld.WALStart, xld.ServerWALEnd, xld.ServerTime, hex.Dump(xld.WALData))
+			metrics.SetWalLSN(xld.WALStart)
 
 			// Parse into logical replication message
 			logicalMsg, err = pglogrepl.Parse(xld.WALData)

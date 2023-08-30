@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/cenkalti/backoff/v4"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/modfin/creek/internal/metrics"
 	"strings"
 	"time"
 
@@ -83,6 +84,11 @@ func (db *DB) startApi() {
 			if err != nil {
 				logrus.Errorf("failed to save initial schema for table %s: %v", split[1], err)
 			}
+			metrics.IncSubscribedTables()
+		}
+
+		if split[0] == "REMOVE" {
+			metrics.DecSubscribedTables()
 		}
 
 	}
