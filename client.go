@@ -376,6 +376,8 @@ func (c *Conn) Snapshot(ctx context.Context, database string, table string) (*Sn
 		return nil, err
 	}
 
+	snapHeader.Topic = topic
+
 	avroSchema, err := avro.Parse(snapHeader.Schema)
 	if err != nil {
 		return nil, err
@@ -436,6 +438,8 @@ func (c *Conn) GetSnapshot(ctx context.Context, topic string) (*SnapshotReader, 
 	if err != nil {
 		return nil, err
 	}
+
+	snapHeader.Topic = topic
 
 	avroSchema, err := avro.Parse(snapHeader.Schema)
 	if err != nil {

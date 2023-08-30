@@ -1,7 +1,6 @@
 package integration_tests
 
 import (
-	"context"
 	"encoding/base64"
 	"testing"
 	"time"
@@ -16,7 +15,7 @@ func TestSetup(t *testing.T) {
 	db := GetDBConn()
 
 	var numRows int
-	err := db.QueryRow(context.Background(), "SELECT count(*) FROM public.types_data").Scan(&numRows)
+	err := db.QueryRow(TimeoutContext(time.Second), "SELECT count(*) FROM public.types_data").Scan(&numRows)
 	assert.NoError(t, err)
 	assert.Equal(t, 1000, numRows)
 }
@@ -26,13 +25,13 @@ func TestInsert(t *testing.T) {
 	db := GetDBConn()
 	creekConn := GetCreekConn()
 
-	_, err := db.Query(context.Background(), "INSERT INTO public.other VALUES (1, 'test');")
+	_, err := db.Exec(TimeoutContext(time.Second), "INSERT INTO public.other VALUES (1, 'test');")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.SteamWAL(context.TODO(), DBname, "public.other")
+	stream, err := creekConn.SteamWAL(TimeoutContext(time.Second*5), DBname, "public.other")
 	assert.NoError(t, err)
 
-	msg, err := stream.Next(context.TODO())
+	msg, err := stream.Next(TimeoutContext(time.Second))
 	assert.NoError(t, err)
 
 	assert.Greater(t, msg.Source.TxAt, time.Time{})
@@ -56,13 +55,13 @@ func TestInsert(t *testing.T) {
 	ts := msg.SentAt
 	lsn := msg.Source.LSN
 
-	_, err = db.Query(context.Background(), "INSERT INTO public.other VALUES (2, 'new stuff');")
+	_, err = db.Exec(TimeoutContext(time.Second), "INSERT INTO public.other VALUES (2, 'new stuff');")
 	assert.NoError(t, err)
 
-	stream, err = creekConn.SteamWALFrom(context.TODO(), DBname, "public.other", time.Time{}, lsn)
+	stream, err = creekConn.SteamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", time.Time{}, lsn)
 	assert.NoError(t, err)
 
-	msg, err = stream.Next(context.TODO())
+	msg, err = stream.Next(TimeoutContext(time.Second))
 	assert.NoError(t, err)
 
 	assert.Greater(t, msg.SentAt, ts)
@@ -77,7 +76,57 @@ func TestInsert(t *testing.T) {
 
 	assert.Equal(t, &expected, msg.After)
 
-	stream.Close()
+}
+
+func TestUpdate(t *testing.T) {
+	EnsureStarted()
+	db := GetDBConn()
+	creekConn := GetCreekConn()
+
+	now := time.Now()
+
+	_, err := db.Exec(TimeoutContext(time.Second), "UPDATE public.other SET data='cool' WHERE id=1;")
+	assert.NoError(t, err)
+	_, err = db.Exec(TimeoutContext(time.Second), "UPDATE public.other SET id=100 WHERE id=1;")
+	assert.NoError(t, err)
+
+	stream, err := creekConn.SteamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", now, "0/0")
+	assert.NoError(t, err)
+
+	msg, err := stream.Next(TimeoutContext(time.Second))
+	assert.NoError(t, err)
+
+	assert.Equal(t, creek.OpUpdate, msg.Op)
+	assert.Equal(t, &map[string]any{"id": 1}, msg.Before)
+	assert.Equal(t, &map[string]any{"id": 1, "data": "cool"}, msg.After)
+
+	msg, err = stream.Next(TimeoutContext(time.Second))
+	assert.NoError(t, err)
+
+	assert.Equal(t, creek.OpUpdatePk, msg.Op)
+	assert.Equal(t, &map[string]any{"id": 1}, msg.Before)
+	assert.Equal(t, &map[string]any{"id": 100, "data": "cool"}, msg.After)
+}
+
+func TestDelete(t *testing.T) {
+	EnsureStarted()
+	db := GetDBConn()
+	creekConn := GetCreekConn()
+
+	now := time.Now()
+	_, err := db.Exec(TimeoutContext(time.Second), "DELETE FROM public.other WHERE id=100;")
+	assert.NoError(t, err)
+
+	stream, err := creekConn.SteamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", now, "0/0")
+	assert.NoError(t, err)
+
+	msg, err := stream.Next(TimeoutContext(time.Second))
+	assert.NoError(t, err)
+
+	var nilMap *map[string]any = nil
+	assert.Equal(t, creek.OpDelete, msg.Op)
+	assert.Equal(t, &map[string]any{"id": 100}, msg.Before)
+	assert.Equal(t, nilMap, msg.After)
 }
 
 func TestSnap(t *testing.T) {
@@ -85,7 +134,7 @@ func TestSnap(t *testing.T) {
 	//db := GetDBConn()
 	creekConn := GetCreekConn()
 
-	reader, err := creekConn.Snapshot(context.TODO(), DBname, "public.types_data")
+	reader, err := creekConn.Snapshot(TimeoutContext(time.Second*5), DBname, "public.types_data")
 	assert.NoError(t, err)
 
 	i := 0
@@ -95,11 +144,11 @@ func TestSnap(t *testing.T) {
 
 	assert.Equal(t, 1000, i)
 
-	data, err := creekConn.ListSnapshots(context.TODO(), DBname, "public.types_data")
+	data, err := creekConn.ListSnapshots(TimeoutContext(time.Second), DBname, "public.types_data")
 	assert.NoError(t, err)
 
 	// Should return the same as above
-	reader, err = creekConn.GetSnapshot(context.TODO(), data[0].Name)
+	reader, err = creekConn.GetSnapshot(TimeoutContext(time.Second*5), data[0].Name)
 	assert.NoError(t, err)
 
 	i = 0
@@ -129,14 +178,13 @@ VALUES (true, 'a', 'hi', 'hello', '2023-01-23', 0.23, 12.32, 123, 231, 123123, '
         '{}', '{text}', '{12:30, 13:20}', '{now()}', '{now(), now()}', '{46145d05-8bc7-403b-8098-1baf99e97b56}', '{231.112}')
         `
 
-	_, err := db.Query(context.Background(), q)
+	_, err := db.Exec(TimeoutContext(time.Second), q)
 	assert.NoError(t, err)
 
-	stream, err := creekConn.SteamWAL(context.TODO(), DBname, "public.types")
+	stream, err := creekConn.SteamWAL(TimeoutContext(time.Second*5), DBname, "public.types")
 	assert.NoError(t, err)
 
-	nextCtx, _ := context.WithTimeout(context.Background(), time.Second)
-	_, err = stream.Next(nextCtx)
+	_, err = stream.Next(TimeoutContext(time.Second))
 	assert.NoError(t, err)
 
 }
@@ -225,7 +273,7 @@ func TestSchema(t *testing.T) {
             "type": [
                 "null",
                 {
-                    "name": "types",
+                    "name": "before.types",
                     "type": "record",
                     "fields": [
                         {
@@ -246,7 +294,7 @@ func TestSchema(t *testing.T) {
             "type": [
                 "null",
                 {
-                    "name": "types",
+                    "name": "after.types",
                     "type": "record",
                     "fields": [
                         {
@@ -294,7 +342,7 @@ func TestSchema(t *testing.T) {
                                     "logicalType": "date"
                                 },
                                 {
-                                    "name": "infinity_modifier",
+                                    "name": "after.infinity_modifier",
                                     "type": "enum",
                                     "symbols": [
                                         "infinity",
@@ -385,14 +433,7 @@ func TestSchema(t *testing.T) {
                                     "type": "long",
                                     "logicalType": "time-micros"
                                 },
-                                {
-                                    "name": "infinity_modifier",
-                                    "type": "enum",
-                                    "symbols": [
-                                        "infinity",
-                                        "negative_infinity_ca5991f51367e3e4"
-                                    ]
-                                }
+                                "after.infinity_modifier"
                             ],
                             "pgKey": false,
                             "pgType": "time"
@@ -405,14 +446,7 @@ func TestSchema(t *testing.T) {
                                     "type": "long",
                                     "logicalType": "timestamp-micros"
                                 },
-                                {
-                                    "name": "infinity_modifier",
-                                    "type": "enum",
-                                    "symbols": [
-                                        "infinity",
-                                        "negative_infinity_ca5991f51367e3e4"
-                                    ]
-                                }
+                                "after.infinity_modifier"
                             ],
                             "pgKey": false,
                             "pgType": "timestamp"
@@ -425,14 +459,7 @@ func TestSchema(t *testing.T) {
                                     "type": "long",
                                     "logicalType": "timestamp-micros"
                                 },
-                                {
-                                    "name": "infinity_modifier",
-                                    "type": "enum",
-                                    "symbols": [
-                                        "infinity",
-                                        "negative_infinity_ca5991f51367e3e4"
-                                    ]
-                                }
+                               	"after.infinity_modifier"
                             ],
                             "pgKey": false,
                             "pgType": "timestamptz"
@@ -519,14 +546,7 @@ func TestSchema(t *testing.T) {
                                             "type": "int",
                                             "logicalType": "date"
                                         },
-                                        {
-                                            "name": "infinity_modifier",
-                                            "type": "enum",
-                                            "symbols": [
-                                                "infinity",
-                                                "negative_infinity_ca5991f51367e3e4"
-                                            ]
-                                        }
+                                        "after.infinity_modifier"
                                     ]
                                 }
                             ],
@@ -640,14 +660,7 @@ func TestSchema(t *testing.T) {
                                             "type": "long",
                                             "logicalType": "time-micros"
                                         },
-                                        {
-                                            "name": "infinity_modifier",
-                                            "type": "enum",
-                                            "symbols": [
-                                                "infinity",
-                                                "negative_infinity_ca5991f51367e3e4"
-                                            ]
-                                        }
+                                        "after.infinity_modifier"
                                     ]
                                 }
                             ],
@@ -665,14 +678,7 @@ func TestSchema(t *testing.T) {
                                             "type": "long",
                                             "logicalType": "timestamp-micros"
                                         },
-                                        {
-                                            "name": "infinity_modifier",
-                                            "type": "enum",
-                                            "symbols": [
-                                                "infinity",
-                                                "negative_infinity_ca5991f51367e3e4"
-                                            ]
-                                        }
+                                        "after.infinity_modifier"
                                     ]
                                 }
                             ],
@@ -690,14 +696,7 @@ func TestSchema(t *testing.T) {
                                             "type": "long",
                                             "logicalType": "timestamp-micros"
                                         },
-                                        {
-                                            "name": "infinity_modifier",
-                                            "type": "enum",
-                                            "symbols": [
-                                                "infinity",
-                                                "negative_infinity_ca5991f51367e3e4"
-                                            ]
-                                        }
+                                        "after.infinity_modifier"
                                     ]
                                 }
                             ],
@@ -742,9 +741,8 @@ func TestSchema(t *testing.T) {
         }
     ]
 }`
-	ctx, _ := context.WithTimeout(context.Background(), time.Second*2)
 
-	schema, err := creekConn.GetLastSchema(ctx, DBname, "public.types")
+	schema, err := creekConn.GetLastSchema(TimeoutContext(time.Second), DBname, "public.types")
 	assert.NoError(t, err)
 
 	assert.JSONEq(t, expectedJSON, schema.Schema)
@@ -758,7 +756,31 @@ func TestSchema(t *testing.T) {
 
 	assert.Equal(t, encoded, schema.Fingerprint)
 
-	schema, err = creekConn.GetSchema(ctx, encoded)
+	schema, err = creekConn.GetSchema(TimeoutContext(time.Second), encoded)
 	assert.NoError(t, err)
 	assert.JSONEq(t, expectedJSON, schema.Schema)
+}
+
+func TestPartitions(t *testing.T) {
+	EnsureStarted()
+	db := GetDBConn()
+	creekConn := GetCreekConn()
+
+	_, err := db.Exec(TimeoutContext(time.Second), "INSERT INTO public.prices VALUES (1, 43.01, '2022-09-13'), (2, 16.98, '2023-09-13');")
+	assert.NoError(t, err)
+
+	stream, err := creekConn.SteamWAL(TimeoutContext(time.Second*5), DBname, "public.prices")
+	assert.NoError(t, err)
+
+	msg, err := stream.Next(TimeoutContext(time.Second))
+	assert.NoError(t, err)
+
+	assert.Equal(t, DBname, msg.Source.DB)
+	assert.Equal(t, "public", msg.Source.Schema)
+	assert.Equal(t, "prices", msg.Source.Table)
+
+	msg, err = stream.Next(TimeoutContext(time.Second))
+	assert.NoError(t, err)
+	assert.Equal(t, "public", msg.Source.Schema)
+	assert.Equal(t, "prices", msg.Source.Table)
 }

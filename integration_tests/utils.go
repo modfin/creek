@@ -25,7 +25,7 @@ func GetConfig() config.Config {
 		PgPublicationName: "test",
 		PgPublicationSlot: "test_0",
 		PgMessageTimeout:  time.Second * 10,
-		PgTables:          []string{"public.types_data", "public.other", "public.types"},
+		PgTables:          []string{"public.types_data", "public.other", "public.types", "public.prices"},
 		NatsUri:           GetNATSURL(),
 		NatsTimeout:       time.Second * 10,
 		NatsMaxPending:    100,
@@ -83,4 +83,9 @@ func GetCreekConn() *creek.Conn {
 	})
 
 	return conn
+}
+
+func TimeoutContext(timeout time.Duration) context.Context {
+	ctx, _ := context.WithTimeout(context.Background(), timeout)
+	return ctx
 }

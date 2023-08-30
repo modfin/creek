@@ -3,21 +3,23 @@ module github.com/modfin/creek
 go 1.20
 
 require (
+	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/docker/docker v24.0.5+incompatible
 	github.com/docker/go-connections v0.4.0
-	github.com/hamba/avro/v2 v2.14.1
-	github.com/hashicorp/golang-lru/v2 v2.0.5
-	github.com/jackc/pglogrepl v0.0.0-20230810221841-d0818e1fbef7
+	github.com/hamba/avro/v2 v2.15.1-0.20230829111833-9a35d44ec666
+	github.com/hashicorp/golang-lru/v2 v2.0.6
+	github.com/jackc/pglogrepl v0.0.0-20230826184802-9ed16cb201f6
 	github.com/jackc/pgx/v5 v5.4.3
 	github.com/kinbiko/jsonassert v1.1.1
 	github.com/lib/pq v1.10.9
-	github.com/modfin/henry v0.0.0-20230815085000-703baac7f2b2
+	github.com/modfin/henry v0.0.0-20230824150253-35f12224ee68
 	github.com/nats-io/nats.go v1.28.0
 	github.com/prometheus/client_golang v1.16.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.8.4
 	github.com/testcontainers/testcontainers-go v0.23.0
 	github.com/urfave/cli/v2 v2.25.7
+	golang.org/x/time v0.3.0
 )
 
 require (
@@ -25,7 +27,6 @@ require (
 	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/containerd/containerd v1.7.3 // indirect
 	github.com/cpuguy83/dockercfg v0.3.1 // indirect

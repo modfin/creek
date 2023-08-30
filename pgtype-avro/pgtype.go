@@ -2,7 +2,6 @@ package pgtypeavro
 
 import (
 	"fmt"
-
 	"github.com/jackc/pglogrepl"
 	"github.com/modfin/henry/slicez"
 )
@@ -89,7 +88,11 @@ func (a *AvroConverter) columnsToAvro(cols []*pglogrepl.RelationMessageColumn) (
 	for _, col := range cols {
 		t, ok := a.tm.TypeForOID(col.DataType)
 		if !ok {
-			return fields, fmt.Errorf("unknown type for oid: %d", col.DataType)
+			t = &SQLType{
+				Name:    "text",
+				OID:     col.DataType,
+				Variant: nil,
+			}
 		}
 		recordField, err = a.typeToAvroField(col, t)
 		if err != nil {
@@ -212,8 +215,8 @@ func (a *AvroConverter) typeToAvroType(col *pglogrepl.RelationMessageColumn, t *
 
 			return derived, nil
 		default:
+			return TypeStr, nil
 			// Limitation: we only support the types above
-			return nil, fmt.Errorf("unsupported type: %d", col.DataType)
 		}
 	} else if t.Variant.Kind == SQLTypeArray {
 		innerType, ok := a.tm.TypeForOID(t.Variant.ItemOID)

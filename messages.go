@@ -55,7 +55,9 @@ func (w WAL) LocalIdentifier() string {
 }
 
 // AvroSchema returns a full WAL message Avro schema based on the before and after schemas
-func AvroSchema(before, after pgtypeavro.Schema) pgtypeavro.Schema {
+func AvroSchema(before, after *pgtypeavro.Record) pgtypeavro.Schema {
+	before.Namespace = "before"
+	after.Namespace = "after"
 	return &pgtypeavro.Record{
 		Type: pgtypeavro.TypeRecord,
 		Name: "publish_message",
@@ -104,6 +106,7 @@ type SchemaMsg struct {
 
 // SnapshotHeader the first message on a snapshot channel
 type SnapshotHeader struct {
+	Topic       string    `json:"topic"`
 	Fingerprint string    `json:"fingerprint"`
 	Schema      string    `json:"schema"`
 	TxId        uint32    `json:"tx_id"`

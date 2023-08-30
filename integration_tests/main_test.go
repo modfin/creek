@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/modfin/creek/integration_tests/env"
 
@@ -14,23 +15,26 @@ import (
 const testNetName = "creek-db-integration_tests-net"
 
 func TestMain(m *testing.M) {
-	var cancel context.CancelFunc
-	testCtx, cancel = context.WithCancel(context.Background())
+	var testCancel context.CancelFunc
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	testCtx, testCancel = context.WithTimeout(context.Background(), time.Minute)
 
 	// Setup test environment, Docker network and Docker containers
-	if err := setupTestEnvironment(context.Background()); err != nil {
+	if err := setupTestEnvironment(ctx); err != nil {
 		os.Exit(1)
 	}
 
 	LoadSql("base.sql")
 	LoadSql("types.sql")
+	LoadSql("partitions.sql")
 
 	// Run tests...
 	exitCode := m.Run()
-	cancel()
+	testCancel()
 
 	// Shut down test containers
-	shutdownTestContainers(context.Background())
+	shutdownTestContainers(ctx)
+	cancel()
 	os.Exit(exitCode)
 }
 
