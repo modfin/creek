@@ -165,27 +165,7 @@ func (c *Container) initDB(dbName, port string) (string, *pgxpool.Pool, error) {
 		return URL, nil, err
 	}
 	err = DB.Ping(context.Background())
-	if err != nil {
-		return URL, DB, err
-	}
-	//start := time.Now()
-	//err = c.LoadSQL(DB, "../testdb/", "^[012345]\\d{2}-.*\\.sql$", 1, false)
-	//if err != nil {
-	//	return URL, DB, err
-	//}
-	//log.Println("Loading test data...")
-	//err = c.LoadSQL(DB, "../testdata/", "^.*\\.sql$", 2, false)
-	//if err != nil {
-	//	return URL, DB, err
-	//}
-	//log.Println("Adding indexes/views/triggers/etc...")
-	//err = c.LoadSQL(DB, "../testdb/", "^[6789]\\d{2}-.*\\.sql$", 1, false)
-	//if err != nil {
-	//	return URL, DB, err
-	//}
-	//log.Println("Adding special test data...")
-	//err = c.LoadSQL(DB, "../testdata/special/", "^.*\\.sql$", 2, true)
-	//log.Printf("Test database loaded in %v", time.Since(start))
+
 	return URL, DB, err
 }
 
