@@ -28,6 +28,7 @@ type Container struct {
 	contextPath string
 	dockerFile  string
 	dbURL       string
+	dbPort      int
 	dbConn      *pgxpool.Pool
 	Env         env.Env
 	fileLogger  *log.Logger
@@ -134,6 +135,7 @@ func (c *Container) Start(ctx context.Context, dockerNetworkName, dbName string)
 	c.startConfig.ctx = &ctx
 	c.startConfig.dockerNetworkName = dockerNetworkName
 	c.startConfig.dbName = dbName
+	c.dbPort = actualPort.Int()
 
 	log.Printf("postgres-test test container started (%v)\n", time.Since(startTime))
 	return err
@@ -153,6 +155,7 @@ func (c *Container) StartLogger(ctx context.Context) {
 
 func (c *Container) DBURL() string         { return c.dbURL }
 func (c *Container) DBConn() *pgxpool.Pool { return c.dbConn }
+func (c *Container) DBPort() int           { return c.dbPort }
 
 func (c *Container) initDB(dbName, port string) (string, *pgxpool.Pool, error) {
 	log.Printf("Initializing %s DB...", dbName)
