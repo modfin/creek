@@ -30,7 +30,8 @@ type lsn uint64
 func init() {
 	avro.Register(string(avro.String)+"."+string(avro.UUID), "")
 	avro.Register(string(avro.Array), []interface{}{})
-	avro.Register("infinity_modifier", "")
+	avro.Register("before.infinity_modifier", "")
+	avro.Register("after.infinity_modifier", "")
 }
 
 type Logger interface {
