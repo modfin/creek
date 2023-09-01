@@ -370,7 +370,7 @@ func main() {
     panic("failed to connect to creek")
   }
 
-  stream, err := conn.SteamWAL(context.Background(), "db", "namespace.table")
+  stream, err := conn.StreamWAL(context.Background(), "db", "namespace.table")
   if err != nil {
     panic("failed to to stream WAL")
   }

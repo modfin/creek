@@ -199,15 +199,15 @@ type WALStream struct {
 	close chan struct{}
 }
 
-// SteamWALFrom opens a consumer for the database and table topic. The table topic should be in the form `namespace.table`.
+// StreamWALFrom opens a consumer for the database and table topic. The table topic should be in the form `namespace.table`.
 // Starts streaming from the first message with the timestamp AND log sequence number (lsn) that is greater than the one provided.
-func (c *Conn) SteamWALFrom(ctx context.Context, database string, table string, timestamp time.Time, lsn string) (steam *WALStream, err error) {
+func (c *Conn) StreamWALFrom(ctx context.Context, database string, table string, timestamp time.Time, lsn string) (stream *WALStream, err error) {
 	topic := fmt.Sprintf("%s.%s.%s.%s", c.parent.rootNs, database, WalStream, table)
 	c.parent.log.Debug(fmt.Sprintf("starting streaming WAL messages on topic %s", topic))
 
 	parsedLSN, err := parseLSN(lsn)
 	if err != nil {
-		return steam, fmt.Errorf("failed to parse LSN: %w", err)
+		return stream, fmt.Errorf("failed to parse LSN: %w", err)
 	}
 
 	consumer, err := c.streams[WalStream].OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
@@ -215,12 +215,12 @@ func (c *Conn) SteamWALFrom(ctx context.Context, database string, table string, 
 		OptStartTime:   &timestamp,
 	})
 	if err != nil {
-		return steam, err
+		return stream, err
 	}
 
 	iter, err := consumer.Messages()
 	if err != nil {
-		return steam, err
+		return stream, err
 	}
 
 	closeChan := make(chan struct{})
@@ -256,8 +256,8 @@ func (c *Conn) SteamWALFrom(ctx context.Context, database string, table string, 
 	return &WALStream{msgs: msgChan, close: closeChan}, nil
 }
 
-// SteamWAL opens a consumer for the database and table topic. The table topic should be in the form `namespace.table`.
-func (c *Conn) SteamWAL(ctx context.Context, database string, table string) (steam *WALStream, err error) {
+// StreamWAL opens a consumer for the database and table topic. The table topic should be in the form `namespace.table`.
+func (c *Conn) StreamWAL(ctx context.Context, database string, table string) (stream *WALStream, err error) {
 	topic := fmt.Sprintf("%s.%s.%s.%s", c.parent.rootNs, database, WalStream, table)
 	c.parent.log.Info(fmt.Sprintf("starting streaming WAL messages on topic %s", topic))
 
@@ -266,12 +266,12 @@ func (c *Conn) SteamWAL(ctx context.Context, database string, table string) (ste
 	})
 
 	if err != nil {
-		return steam, err
+		return stream, err
 	}
 
 	iter, err := consumer.Messages()
 	if err != nil {
-		return steam, err
+		return stream, err
 	}
 
 	closeChan := make(chan struct{})
