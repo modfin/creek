@@ -5,7 +5,7 @@ go 1.20
 require (
 	github.com/Shopify/toxiproxy/v2 v2.6.0
 	github.com/cenkalti/backoff/v4 v4.2.1
-	github.com/docker/docker v24.0.5+incompatible
+	github.com/docker/docker v24.0.7+incompatible
 	github.com/docker/go-connections v0.4.0
 	github.com/hamba/avro/v2 v2.15.1-0.20230829111833-9a35d44ec666
 	github.com/hashicorp/golang-lru/v2 v2.0.6
