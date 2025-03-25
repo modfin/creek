@@ -56,8 +56,6 @@ func main() {
 		Action: serve,
 	}
 
-	cmd.SliceFlagSeparator = " "
-
 	if err := cmd.Run(ctx, os.Args); err != nil {
 		logrus.Fatal(err)
 	}
