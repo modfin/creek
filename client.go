@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -131,6 +132,19 @@ func (c *Client) GetStreamName(streamType StreamType) string {
 
 // Connect Connects the Client to nats
 func (c *Client) Connect(ctx context.Context) (*Conn, error) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return nil, err
+	}
+	hostname = strings.Split(hostname, ".")[0]
+
+	// Default options that can be overridden by the client
+	opts := []nats.Option{
+		nats.Name(hostname),
+		nats.PingInterval(2 * time.Second),
+	}
+	c.natsOpts = append(opts, c.natsOpts...)
+
 	nc, err := nats.Connect(c.uri, c.natsOpts...)
 	if err != nil {
 		return nil, err
@@ -203,7 +217,7 @@ type WALStream struct {
 	close chan struct{}
 }
 
-// StreamWALFrom opens a consumer for the database and table topic. The table topic should be in the form `namespace.table`.
+// StreamWALFrom opens a consumer for the database and table topic. The table topic should be in the form `<STEAM_NAME>.<DATABASE_SCHEMA>.<DATABASE_TABLE>`.
 // Starts streaming from the first message with the timestamp AND log sequence number (lsn) that is greater than the one provided.
 func (c *Conn) StreamWALFrom(ctx context.Context, tableSchema string, table string, timestamp time.Time, lsn string) (stream *WALStream, err error) {
 	topic := fmt.Sprintf("%s.%s.%s", c.parent.GetStreamName(WalStream), tableSchema, table)
@@ -261,7 +275,7 @@ func (c *Conn) StreamWALFrom(ctx context.Context, tableSchema string, table stri
 	return &WALStream{msgs: msgChan, close: closeChan}, nil
 }
 
-// StreamWAL opens a consumer for the database and table topic. The table topic should be in the form `namespace.table`.
+// StreamWAL opens a consumer for the database and table topic. The table topic should be in the form `<STEAM_NAME>.<DATABASE_SCHEMA>.<DATABASE_TABLE>`.
 func (c *Conn) StreamWAL(ctx context.Context, tableSchema string, table string) (stream *WALStream, err error) {
 	topic := fmt.Sprintf("%s.%s.%s", c.parent.GetStreamName(WalStream), tableSchema, table)
 	c.parent.log.Info(fmt.Sprintf("starting streaming WAL messages on topic %s", topic))

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -87,7 +86,6 @@ func serve(ctx context.Context, cmd *cli.Command) error {
 		logrus.Panicln("failed to initialize database: ", err)
 	}
 
-	fmt.Println(cfg.NatsConfig.Retention)
 	queue, err := mq.New(ctx, cfg.NatsConfig.Uri, cfg.NatsConfig.NameSpace, cfg.NatsConfig.MaxPending, db)
 	if err != nil {
 		logrus.Panicln("failed to initialize nats: ", err)

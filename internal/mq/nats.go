@@ -5,7 +5,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/modfin/henry/slicez"
 
@@ -94,8 +97,19 @@ func New(ctx context.Context, uri string, root string, maxPending int, db *dao.D
 		snapsDone:  make(chan struct{}),
 	}
 
+	hostname, err := os.Hostname()
+	if err != nil {
+		return nil, err
+	}
+	hostname = strings.Split(hostname, ".")[0]
+
+	opts := []nats.Option{
+		nats.Name(hostname),
+		nats.PingInterval(2 * time.Second),
+	}
+
 	mq.uri = uri
-	mq.conn, err = nats.Connect(uri)
+	mq.conn, err = nats.Connect(uri, opts...)
 	if err != nil {
 		return nil, err
 	}
