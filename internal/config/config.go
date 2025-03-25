@@ -2,21 +2,37 @@ package config
 
 import (
 	"time"
+
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 type Config struct {
-	LogLevel string `cli:"log-level"`
+	LogLevel       string     `cli:"log-level"`
+	Tables         []string   `cli:"tables"`
+	PgConfig       PgConfig   `cli-prefix:"pg-"`
+	NatsConfig     NatsConfig `cli-prefix:"nats-"`
+	PrometheusPort int        `cli:"prometheus-port"`
+}
 
-	PgUri             string        `cli:"pg-uri"`
-	PgPublicationName string        `cli:"pg-publication-name"`
-	PgPublicationSlot string        `cli:"pg-publication-slot"`
-	PgMessageTimeout  time.Duration `cli:"pg-message-timeout"`
-	PgTables          []string      `cli:"tables"`
+type NatsConfig struct {
+	Uri        string          `cli:"uri"`
+	Timeout    time.Duration   `cli:"timeout"`
+	MaxPending int             `cli:"max-pending"`
+	NameSpace  string          `cli:"namespace"`
+	Retention  RetentionConfig `cli-prefix:"retention-"`
+	Replicas   int             `cli:"replicas"`
+}
 
-	NatsUri        string        `cli:"nats-uri"`
-	NatsTimeout    time.Duration `cli:"nats-timeout"`
-	NatsMaxPending int           `cli:"nats-max-pending"`
-	NatsNameSpace  string        `cli:"nats-namespace"`
+type RetentionConfig struct {
+	Policy   jetstream.RetentionPolicy `cli:"policy"`
+	MaxAge   time.Duration             `cli:"max-age"`
+	MaxBytes int64                     `cli:"max-bytes"`
+	MaxMsgs  int64                     `cli:"max-msgs"`
+}
 
-	PrometheusPort int `cli:"prometheus-port"`
+type PgConfig struct {
+	Uri             string        `cli:"uri"`
+	PublicationName string        `cli:"publication-name"`
+	PublicationSlot string        `cli:"publication-slot"`
+	MessageTimeout  time.Duration `cli:"message-timeout"`
 }

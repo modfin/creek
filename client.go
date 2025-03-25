@@ -54,6 +54,7 @@ func (d simpleLogger) Error(format string, args ...interface{}) {
 type Client struct {
 	uri    string
 	rootNs string
+	db     string
 
 	log Logger
 
@@ -82,9 +83,9 @@ type Conn struct {
 }
 
 // NewClient Creates a new creek client
-func NewClient(natsUri string, rootNamespace string) *Client {
+func NewClient(natsUri string, rootNamespace string, db string) *Client {
 	logger := simpleLogger{}
-	return &Client{uri: natsUri, rootNs: rootNamespace, log: logger}
+	return &Client{uri: natsUri, rootNs: rootNamespace, db: db, log: logger}
 }
 
 func (c *Client) With(opts ...func(c *Client)) *Client {
@@ -124,8 +125,12 @@ func (c *Client) WithJetstreamOptions(opts ...jetstream.JetStreamOpt) {
 	c.With(JetstreamOptions(opts...))
 }
 
+func (c *Client) GetStreamName(streamType StreamType) string {
+	return fmt.Sprintf("%s_%s_%s", c.rootNs, streamType, c.db)
+}
+
 // Connect Connects the Client to nats
-func (c *Client) Connect() (*Conn, error) {
+func (c *Client) Connect(ctx context.Context) (*Conn, error) {
 	nc, err := nats.Connect(c.uri, c.natsOpts...)
 	if err != nil {
 		return nil, err
@@ -137,14 +142,13 @@ func (c *Client) Connect() (*Conn, error) {
 	}
 
 	streams := make(map[StreamType]jetstream.Stream)
-	for _, st := range []StreamType{WalStream, SnapStream, SchemaStream} {
-		stream, err := js.Stream(context.Background(), fmt.Sprintf("%s_%s", c.rootNs, st))
+	for _, streamType := range []StreamType{WalStream, SnapStream, SchemaStream} {
+		stream, err := js.Stream(ctx, c.GetStreamName(streamType))
 		if err != nil {
 			return nil, err
 		}
-		streams[st] = stream
+		streams[streamType] = stream
 	}
-
 	conn := &Conn{js: js, nc: nc, streams: streams, parent: c}
 
 	return conn, nil
@@ -161,7 +165,7 @@ func (c *Conn) Close() {
 func (c *Conn) GetSchema(ctx context.Context, fingerprint string) (SchemaMsg, error) {
 	var schema SchemaMsg
 
-	resp, err := c.nc.RequestWithContext(ctx, fmt.Sprintf("%s._schema", c.parent.rootNs), []byte(fingerprint))
+	resp, err := c.nc.RequestWithContext(ctx, c.parent.GetStreamName(SchemaStream), []byte(fingerprint))
 	if err != nil {
 		return schema, err
 	}
@@ -175,8 +179,8 @@ func (c *Conn) GetSchema(ctx context.Context, fingerprint string) (SchemaMsg, er
 }
 
 // GetLastSchema returns the latest schema if it exists.
-func (c *Conn) GetLastSchema(ctx context.Context, database string, table string) (schema SchemaMsg, err error) {
-	msg, err := c.streams[SchemaStream].GetLastMsgForSubject(ctx, fmt.Sprintf("%s.%s.%s.%s", c.parent.rootNs, database, SchemaStream, table))
+func (c *Conn) GetLastSchema(ctx context.Context, tableSchema string, table string) (schema SchemaMsg, err error) {
+	msg, err := c.streams[SchemaStream].GetLastMsgForSubject(ctx, fmt.Sprintf("%s.%s.%s", c.parent.GetStreamName(SchemaStream), tableSchema, table))
 	if errors.Is(err, jetstream.ErrMsgNotFound) {
 		return schema, ErrNoSchemaFound
 	}
@@ -201,8 +205,8 @@ type WALStream struct {
 
 // StreamWALFrom opens a consumer for the database and table topic. The table topic should be in the form `namespace.table`.
 // Starts streaming from the first message with the timestamp AND log sequence number (lsn) that is greater than the one provided.
-func (c *Conn) StreamWALFrom(ctx context.Context, database string, table string, timestamp time.Time, lsn string) (stream *WALStream, err error) {
-	topic := fmt.Sprintf("%s.%s.%s.%s", c.parent.rootNs, database, WalStream, table)
+func (c *Conn) StreamWALFrom(ctx context.Context, tableSchema string, table string, timestamp time.Time, lsn string) (stream *WALStream, err error) {
+	topic := fmt.Sprintf("%s.%s.%s", c.parent.GetStreamName(WalStream), tableSchema, table)
 	c.parent.log.Debug(fmt.Sprintf("starting streaming WAL messages on topic %s", topic))
 
 	parsedLSN, err := parseLSN(lsn)
@@ -212,6 +216,7 @@ func (c *Conn) StreamWALFrom(ctx context.Context, database string, table string,
 
 	consumer, err := c.streams[WalStream].OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
 		FilterSubjects: []string{topic},
+		DeliverPolicy:  jetstream.DeliverByStartTimePolicy,
 		OptStartTime:   &timestamp,
 	})
 	if err != nil {
@@ -257,8 +262,8 @@ func (c *Conn) StreamWALFrom(ctx context.Context, database string, table string,
 }
 
 // StreamWAL opens a consumer for the database and table topic. The table topic should be in the form `namespace.table`.
-func (c *Conn) StreamWAL(ctx context.Context, database string, table string) (stream *WALStream, err error) {
-	topic := fmt.Sprintf("%s.%s.%s.%s", c.parent.rootNs, database, WalStream, table)
+func (c *Conn) StreamWAL(ctx context.Context, tableSchema string, table string) (stream *WALStream, err error) {
+	topic := fmt.Sprintf("%s.%s.%s", c.parent.GetStreamName(WalStream), tableSchema, table)
 	c.parent.log.Info(fmt.Sprintf("starting streaming WAL messages on topic %s", topic))
 
 	consumer, err := c.streams[WalStream].OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
@@ -331,13 +336,11 @@ type SnapshotReader struct {
 }
 
 // Snapshot request a new snapshot from creek. Returns a blocking channel containing snapshot data rows.
-func (c *Conn) Snapshot(ctx context.Context, database string, table string) (*SnapshotReader, error) {
-	// TODO: better way of spitting namespace and table (namespace and table can contain .)
-	substr := strings.SplitN(table, ".", 2)
+func (c *Conn) Snapshot(ctx context.Context, tableSchema string, table string) (*SnapshotReader, error) {
 	msg := SnapshotRequest{
-		Database:  database,
-		Namespace: substr[0],
-		Table:     substr[1],
+		Database:  c.parent.db,
+		Namespace: tableSchema, // rootNs is used as namespace for streams and is called root as we don't use schema for the pg schema (instead we use namespace)
+		Table:     table,
 	}
 
 	b, err := json.Marshal(msg)
@@ -346,7 +349,7 @@ func (c *Conn) Snapshot(ctx context.Context, database string, table string) (*Sn
 	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, time.Second)
-	resp, err := c.nc.RequestWithContext(reqCtx, fmt.Sprintf("%s._snapshot", c.parent.rootNs), b)
+	resp, err := c.nc.RequestWithContext(reqCtx, c.parent.GetStreamName(SnapStream), b)
 	cancel()
 	if err != nil {
 		return nil, err
@@ -477,8 +480,8 @@ type SnapMetadata struct {
 }
 
 // ListSnapshots returns a sorted list (in ascending order by creation date) of existing snapshots for a particular table
-func (c *Conn) ListSnapshots(ctx context.Context, database string, table string) ([]SnapMetadata, error) {
-	info, err := c.streams[SnapStream].Info(ctx, jetstream.WithSubjectFilter(fmt.Sprintf("%s.%s.%s.%s.*", c.parent.rootNs, database, SnapStream, table)))
+func (c *Conn) ListSnapshots(ctx context.Context, tableSchema string, table string) ([]SnapMetadata, error) {
+	info, err := c.streams[SnapStream].Info(ctx, jetstream.WithSubjectFilter(fmt.Sprintf("%s.%s.%s.*", c.parent.GetStreamName(SnapStream), tableSchema, table)))
 	if err != nil {
 		return nil, err
 	}
@@ -675,10 +678,9 @@ func (c *Conn) getAvroSchema(ctx context.Context, fingerprint string) (avro.Sche
 		return avroSchema, nil
 	}
 
-	requestTopic := fmt.Sprintf("%s._schema", c.parent.rootNs)
-	c.parent.log.Info(fmt.Sprintf("Requesting schema for fingerprint %s on topic %s", fingerprint, requestTopic))
+	c.parent.log.Info(fmt.Sprintf("Requesting schema for fingerprint %s on topic %s", fingerprint, c.parent.GetStreamName(SchemaStream)))
 
-	resp, err := c.nc.RequestWithContext(ctx, requestTopic, []byte(fingerprint))
+	resp, err := c.nc.RequestWithContext(ctx, c.parent.GetStreamName(SchemaStream), []byte(fingerprint))
 	if err != nil {
 		return nil, err
 	}

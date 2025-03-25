@@ -29,7 +29,7 @@ func (mq *MQ) startSnapshotService() error {
 
 	// Expect messages to be in json containing, example:
 	// {"database": "db", "namespace": "public", "table": "data"}
-	sub, err := mq.conn.Subscribe(fmt.Sprintf("%s._snapshot", mq.root), func(m *nats.Msg) {
+	sub, err := mq.conn.Subscribe(mq.streamName(creek.SnapStream), func(m *nats.Msg) {
 		if m.Reply == "" {
 			return
 		}
@@ -135,5 +135,5 @@ func (mq *MQ) genSnapTopic(seed int64, timestamp time.Time, msg creek.SnapshotRe
 
 	escaped := strings.ReplaceAll(timeStr, ".", "_")
 
-	return fmt.Sprintf("%s.%s.%s.%s.%s_%s", mq.ns, creek.SnapStream, msg.Namespace, msg.Table, escaped, randStr)
+	return fmt.Sprintf("%s.%s.%s.%s_%s", mq.streamName(creek.SnapStream), msg.Namespace, msg.Table, escaped, randStr)
 }

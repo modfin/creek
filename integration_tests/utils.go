@@ -9,6 +9,7 @@ import (
 	"github.com/modfin/creek/internal/config"
 	"github.com/modfin/creek/internal/dao"
 	"github.com/modfin/creek/internal/mq"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/sirupsen/logrus"
 )
 
@@ -43,16 +44,26 @@ var msgCounter *LogMsgCounter
 func GetConfig() config.Config {
 
 	return config.Config{
-		LogLevel:          "trace",
-		PgUri:             GetDBURL(),
-		PgPublicationName: "test",
-		PgPublicationSlot: "test_0",
-		PgMessageTimeout:  time.Second * 10,
-		PgTables:          []string{"public.types_data", "public.other", "public.types", "public.prices"},
-		NatsUri:           GetNATSURL(),
-		NatsTimeout:       time.Second * 10,
-		NatsMaxPending:    100,
-		NatsNameSpace:     "CREEK",
+		LogLevel: "trace",
+		PgConfig: config.PgConfig{
+			Uri:             GetDBURL(),
+			PublicationName: "test",
+			PublicationSlot: "test_0",
+			MessageTimeout:  time.Second * 10,
+		},
+		Tables: []string{"public.types_data", "public.other", "public.types", "public.prices"},
+		NatsConfig: config.NatsConfig{
+			Uri:        GetNATSURL(),
+			Timeout:    time.Second * 10,
+			MaxPending: 100,
+			NameSpace:  "CREEK",
+			Retention: config.RetentionConfig{
+				Policy:   jetstream.LimitsPolicy,
+				MaxAge:   0,
+				MaxBytes: 0,
+				MaxMsgs:  0,
+			},
+		},
 	}
 
 }
@@ -75,12 +86,12 @@ func EnsureStarted() {
 			logrus.Fatal("failed to connect to database: ", err)
 		}
 
-		queue, err := mq.New(testCtx, cfg.NatsUri, cfg.NatsNameSpace, cfg.NatsMaxPending, db)
+		queue, err := mq.New(testCtx, cfg.NatsConfig.Uri, cfg.NatsConfig.NameSpace, cfg.NatsConfig.MaxPending, db)
 		if err != nil {
 			logrus.Fatal("failed to initialize nats: ", err)
 		}
 
-		replication, err := db.StartReplication(cfg.PgTables, cfg.PgPublicationName, cfg.PgPublicationSlot)
+		replication, err := db.StartReplication(cfg.Tables, cfg.PgConfig.PublicationName, cfg.PgConfig.PublicationSlot)
 		if err != nil {
 			logrus.Fatal("failed to start replication", err)
 		}
@@ -103,7 +114,7 @@ func GetCreekConn() *creek.Conn {
 		cfg := GetConfig()
 
 		var err error
-		conn, err = creek.NewClient(cfg.NatsUri, cfg.NatsNameSpace).Connect()
+		conn, err = creek.NewClient(cfg.NatsConfig.Uri, cfg.NatsConfig.NameSpace, DBname).Connect(context.Background())
 		if err != nil {
 			logrus.Fatal("failed to connect client", err)
 		}

@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/modfin/creek/internal/metrics"
 	"strings"
+
+	"github.com/modfin/creek/internal/metrics"
 
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5"
@@ -35,7 +36,7 @@ type DB struct {
 func New(ctx context.Context, cfg config.Config) (*DB, error) {
 	var db *DB
 
-	poolCfg, err := pgxpool.ParseConfig(cfg.PgUri)
+	poolCfg, err := pgxpool.ParseConfig(cfg.PgConfig.Uri)
 	if err != nil {
 		return db, fmt.Errorf("failed parse PostgreSQL config: %w", err)
 	}
@@ -291,7 +292,7 @@ func (db *DB) CanSnapshot(namespace string, table string) (bool, error) {
 	var count int
 	err := db.pool.QueryRow(db.ctx,
 		"SELECT COUNT(*) FROM pg_catalog.pg_publication_tables WHERE pubname = $1 AND schemaname = $2 AND tablename = $3",
-		db.cfg.PgPublicationName, namespace, table).Scan(&count)
+		db.cfg.PgConfig.PublicationName, namespace, table).Scan(&count)
 	if err != nil || count == 0 {
 		return false, err
 	}

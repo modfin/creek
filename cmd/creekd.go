@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -47,6 +48,11 @@ func main() {
 			&cli.IntFlag{Name: "nats-max-pending", Value: 4000, Sources: cli.EnvVars("NATS_MAX_PENDING")},
 			&cli.StringFlag{Name: "nats-namespace", Value: "CREEK", Sources: cli.EnvVars("NATS_NAMESPACE")},
 			&cli.IntFlag{Name: "prometheus-port", Value: 7779, Sources: cli.EnvVars("PROMETHEUS_PORT")},
+			&cli.IntFlag{Name: "nats-replicas", Value: 1, Sources: cli.EnvVars("NATS_REPLICAS")},
+			&cli.IntFlag{Name: "nats-retention-policy", Value: 0, Sources: cli.EnvVars("NATS_RETENTION_POLICY")},
+			&cli.DurationFlag{Name: "nats-retention-max-age", Value: 0, Sources: cli.EnvVars("NATS_RETENTION_MAX_AGE")},
+			&cli.IntFlag{Name: "nats-retention-max-bytes", Value: 0, Sources: cli.EnvVars("NATS_RETENTION_MAX_BYTES")},
+			&cli.IntFlag{Name: "nats-retention-max-msgs", Value: 0, Sources: cli.EnvVars("NATS_RETENTION_LIMIT_MAX_MSGS")},
 		},
 		Action: serve,
 	}
@@ -81,14 +87,15 @@ func serve(ctx context.Context, cmd *cli.Command) error {
 		logrus.Panicln("failed to initialize database: ", err)
 	}
 
-	queue, err := mq.New(ctx, cfg.NatsUri, cfg.NatsNameSpace, cfg.NatsMaxPending, db)
+	fmt.Println(cfg.NatsConfig.Retention)
+	queue, err := mq.New(ctx, cfg.NatsConfig.Uri, cfg.NatsConfig.NameSpace, cfg.NatsConfig.MaxPending, db)
 	if err != nil {
 		logrus.Panicln("failed to initialize nats: ", err)
 	}
 
 	go metrics.Start(ctx, cfg.PrometheusPort)
 
-	replication, err := db.StartReplication(cfg.PgTables, cfg.PgPublicationName, cfg.PgPublicationSlot)
+	replication, err := db.StartReplication(cfg.Tables, cfg.PgConfig.PublicationName, cfg.PgConfig.PublicationSlot)
 	if err != nil {
 		logrus.Panicln("failed to start replication", err)
 	}
@@ -139,13 +146,13 @@ func initAndVerifyConfig(cmd *cli.Command) (*config.Config, error) {
 	logrus.AddHook(limitedWriter) // Writes to stdout with rate limit
 	logrus.SetOutput(io.Discard)  // Discard messages
 
-	if cfg.PgUri == "" {
+	if cfg.PgConfig.Uri == "" {
 		return nil, errors.New("pg-uri is required")
 	}
-	if cfg.PgPublicationName == "" {
+	if cfg.PgConfig.PublicationName == "" {
 		return nil, errors.New("pg-publication-name is required")
 	}
-	if cfg.PgPublicationSlot == "" {
+	if cfg.PgConfig.PublicationSlot == "" {
 		return nil, errors.New("pg-publication-slot is required")
 	}
 	return &cfg, nil

@@ -2,6 +2,7 @@ package integration_tests
 
 import (
 	"encoding/base64"
+	"fmt"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ func TestInsert(t *testing.T) {
 	_, err := db.Exec(TimeoutContext(time.Second), "INSERT INTO public.other VALUES (1, 'test');")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.StreamWAL(TimeoutContext(time.Second*5), DBname, "public.other")
+	stream, err := creekConn.StreamWAL(TimeoutContext(time.Second*5), "public", "other")
 	assert.NoError(t, err)
 
 	msg, err := stream.Next(TimeoutContext(time.Second))
@@ -58,7 +59,7 @@ func TestInsert(t *testing.T) {
 	_, err = db.Exec(TimeoutContext(time.Second), "INSERT INTO public.other VALUES (2, 'new stuff');")
 	assert.NoError(t, err)
 
-	stream, err = creekConn.StreamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", time.Time{}, lsn)
+	stream, err = creekConn.StreamWALFrom(TimeoutContext(time.Second*5), "public", "other", time.Time{}, lsn)
 	assert.NoError(t, err)
 
 	msg, err = stream.Next(TimeoutContext(time.Second))
@@ -84,13 +85,14 @@ func TestUpdate(t *testing.T) {
 	creekConn := GetCreekConn()
 
 	now := time.Now()
+	fmt.Printf("now: %+v\n", now)
 
 	_, err := db.Exec(TimeoutContext(time.Second), "UPDATE public.other SET data='cool' WHERE id=1;")
 	assert.NoError(t, err)
 	_, err = db.Exec(TimeoutContext(time.Second), "UPDATE public.other SET id=100 WHERE id=1;")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.StreamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", now, "0/0")
+	stream, err := creekConn.StreamWALFrom(TimeoutContext(time.Second*5), "public", "other", now, "0/0")
 	assert.NoError(t, err)
 
 	msg, err := stream.Next(TimeoutContext(time.Second))
@@ -117,7 +119,7 @@ func TestDelete(t *testing.T) {
 	_, err := db.Exec(TimeoutContext(time.Second), "DELETE FROM public.other WHERE id=100;")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.StreamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", now, "0/0")
+	stream, err := creekConn.StreamWALFrom(TimeoutContext(time.Second*5), "public", "other", now, "0/0")
 	assert.NoError(t, err)
 
 	msg, err := stream.Next(TimeoutContext(time.Second))
@@ -134,7 +136,7 @@ func TestSnap(t *testing.T) {
 	//db := GetDBConn()
 	creekConn := GetCreekConn()
 
-	reader, err := creekConn.Snapshot(TimeoutContext(time.Second*5), DBname, "public.types_data")
+	reader, err := creekConn.Snapshot(TimeoutContext(time.Second*5), "public", "types_data")
 	assert.NoError(t, err)
 
 	i := 0
@@ -144,7 +146,7 @@ func TestSnap(t *testing.T) {
 
 	assert.Equal(t, 1000, i)
 
-	data, err := creekConn.ListSnapshots(TimeoutContext(time.Second), DBname, "public.types_data")
+	data, err := creekConn.ListSnapshots(TimeoutContext(time.Second), "public", "types_data")
 	assert.NoError(t, err)
 
 	// Should return the same as above
@@ -181,7 +183,7 @@ VALUES (true, 'a', 'hi', 'hello', '2023-01-23', 0.23, 12.32, 123, 231, 123123, '
 	_, err := db.Exec(TimeoutContext(time.Second), q)
 	assert.NoError(t, err)
 
-	stream, err := creekConn.StreamWAL(TimeoutContext(time.Second*5), DBname, "public.types")
+	stream, err := creekConn.StreamWAL(TimeoutContext(time.Second*5), "public", "types")
 	assert.NoError(t, err)
 
 	_, err = stream.Next(TimeoutContext(time.Second))
@@ -742,7 +744,7 @@ func TestSchema(t *testing.T) {
     ]
 }`
 
-	schema, err := creekConn.GetLastSchema(TimeoutContext(time.Second), DBname, "public.types")
+	schema, err := creekConn.GetLastSchema(TimeoutContext(time.Second), "public", "types")
 	assert.NoError(t, err)
 
 	assert.JSONEq(t, expectedJSON, schema.Schema)
@@ -769,7 +771,7 @@ func TestPartitions(t *testing.T) {
 	_, err := db.Exec(TimeoutContext(time.Second), "INSERT INTO public.prices VALUES (1, 43.01, '2022-09-13'), (2, 16.98, '2023-09-13');")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.StreamWAL(TimeoutContext(time.Second*5), DBname, "public.prices")
+	stream, err := creekConn.StreamWAL(TimeoutContext(time.Second*5), "public", "prices")
 	assert.NoError(t, err)
 
 	msg, err := stream.Next(TimeoutContext(time.Second))
@@ -808,7 +810,7 @@ func TestRestart(t *testing.T) {
 	_, err = db.Exec(TimeoutContext(time.Second), "INSERT INTO public.other VALUES (999, 'reconnect');")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.StreamWALFrom(TimeoutContext(time.Second*5), DBname, "public.other", now, "0/0")
+	stream, err := creekConn.StreamWALFrom(TimeoutContext(time.Second*5), "public", "other", now, "0/0")
 	assert.NoError(t, err)
 
 	msg, err := stream.Next(TimeoutContext(time.Second * 2))

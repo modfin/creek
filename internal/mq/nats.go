@@ -5,11 +5,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/modfin/henry/slicez"
 	"sync"
+
+	"github.com/modfin/henry/slicez"
 
 	"github.com/modfin/creek"
 
+	"github.com/modfin/creek/internal/config"
 	"github.com/modfin/creek/internal/dao"
 
 	"github.com/nats-io/nats.go"
@@ -26,8 +28,7 @@ type MQ struct {
 	closeOnce sync.Once
 	doneChan  chan struct{}
 
-	ns string
-
+	cfg  config.NatsConfig
 	db   *dao.DB
 	conn *nats.Conn
 
@@ -58,20 +59,21 @@ type msg struct {
 //}
 
 func (mq *MQ) streamName(_type creek.StreamType) string {
-	return fmt.Sprintf("%s_%s", mq.root, _type)
+	return fmt.Sprintf("%s_%s_%s", mq.root, _type, mq.db.DatabaseName())
 }
-
 func (mq *MQ) assignStream(_type creek.StreamType) error {
 	streamName := mq.streamName(_type)
 
-	stream, err := mq.js.Stream(context.Background(), streamName)
-	if errors.Is(err, jetstream.ErrStreamNotFound) {
-		stream, err = mq.js.CreateStream(context.Background(), jetstream.StreamConfig{
-			Name:        streamName,
-			Description: "Creek stream relating to " + streamName,
-			Subjects:    []string{fmt.Sprintf("%s.%s.>", mq.ns, _type)},
-		})
-	}
+	stream, err := mq.js.CreateOrUpdateStream(mq.ctx, jetstream.StreamConfig{
+		Name:        streamName,
+		Replicas:    mq.cfg.Replicas,
+		Description: "Creek stream relating to " + streamName,
+		Subjects:    []string{fmt.Sprintf("%s.>", streamName)},
+		MaxAge:      mq.cfg.Retention.MaxAge,
+		MaxBytes:    mq.cfg.Retention.MaxBytes,
+		MaxMsgs:     mq.cfg.Retention.MaxMsgs,
+		Retention:   mq.cfg.Retention.Policy,
+	})
 	if err != nil {
 		return err
 	}
@@ -85,7 +87,6 @@ func New(ctx context.Context, uri string, root string, maxPending int, db *dao.D
 		ctx:        ctx,
 		uri:        uri,
 		root:       root,
-		ns:         fmt.Sprintf("%s.%s", root, db.DatabaseName()),
 		db:         db,
 		streams:    map[string]jetstream.Stream{},
 		publishBus: make(chan msg, 1),

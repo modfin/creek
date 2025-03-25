@@ -171,7 +171,7 @@ func shutdownTestContainers(ctx context.Context) {
 	log.Print("Shutting down containers..")
 	var wg sync.WaitGroup
 	terminate := func(container interface {
-		Terminate(ctx context.Context) error
+		Terminate(ctx context.Context, options ...testcontainers.TerminateOption) error
 	}) {
 		defer wg.Done()
 		err := container.Terminate(ctx)

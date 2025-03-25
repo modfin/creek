@@ -1,12 +1,13 @@
 package pgtypeavro
 
 import (
+	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/kinbiko/jsonassert"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -297,15 +298,55 @@ func TestRelationMessageToAvro(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ja := jsonassert.New(t)
-
+			// Get the actual result
 			res, err := New(tc.input).RelationMessageToAvro()
 			assert.NoError(t, err)
 
-			b, err := json.Marshal(res)
+			// Marshal the actual result to JSON
+			actualBytes, err := json.Marshal(res)
 			assert.NoError(t, err)
 
-			ja.Assertf(string(b), tc.expected)
+			// Normalize expected JSON to remove whitespace and format consistently
+			expectedNormalized := normalizeJSON(tc.expected)
+
+			// Parse both as generic maps for comparison
+			var expectedMap, actualMap map[string]interface{}
+
+			err = json.Unmarshal([]byte(expectedNormalized), &expectedMap)
+			assert.NoError(t, err, "Expected JSON should be valid")
+
+			err = json.Unmarshal(actualBytes, &actualMap)
+			assert.NoError(t, err, "Actual JSON should be valid")
+
+			// Compare the structures
+			assert.Equal(t, expectedMap, actualMap, "JSON structures should match for test case: "+tc.name)
+
+			// Alternative direct JSON comparison (useful for debugging)
+			// Normalize both to the same format
+			actualNormalized := normalizeJSON(string(actualBytes))
+			if expectedNormalized != actualNormalized {
+				t.Logf("JSON formatting differs:\nExpected: %s\nActual: %s", expectedNormalized, actualNormalized)
+			}
 		})
 	}
+}
+
+// normalizeJSON removes whitespace and formats the JSON string consistently
+// to make it suitable for comparison
+func normalizeJSON(jsonStr string) string {
+	// Remove leading/trailing whitespace from each line
+	lines := strings.Split(jsonStr, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimSpace(line)
+	}
+
+	// Rejoin and parse the JSON to ensure valid format
+	var buf bytes.Buffer
+	err := json.Compact(&buf, []byte(strings.Join(lines, "")))
+	if err != nil {
+		// Return original if compact fails
+		return jsonStr
+	}
+
+	return buf.String()
 }

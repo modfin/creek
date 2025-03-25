@@ -2,6 +2,8 @@ version: '3.0'
 
 services:
   creek-producer:
+    networks:
+      - creek
     build:
       dockerfile: Dockerfile.dev
       context: .
@@ -17,6 +19,7 @@ services:
       NATS_NAMESPACE: CREEK
       NATS_MAX_PENDING: 4000
       NATS_TIMEOUT: 30s
+      NATS_RETENTION_MAX_AGE: 24h
     volumes:
       - .:/creek
       - gopkg-creek:/go/pkg
@@ -27,6 +30,8 @@ services:
 
   nats:
     image: nats
+    networks:
+      - creek
     ports:
       - "8222:8222"
       - "4222:4222"
@@ -34,6 +39,8 @@ services:
 
   nats-exporter:
     image: natsio/prometheus-nats-exporter:0.16.0
+    networks:
+      - creek
     ports:
       - "7777:7777"
     command: "-varz -healthz -connz -jsz=all http://nats:8222"
@@ -42,6 +49,8 @@ services:
 
   prometheus:
     image: prom/prometheus
+    networks:
+      - creek
     volumes:
       - .supporting/prometheus:/etc/prometheus
       - prom_data:/prometheus
@@ -51,6 +60,8 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
   grafana:
     image: grafana/grafana
+    networks:
+      - creek
     ports:
       - 3000:3000
     volumes:
@@ -58,7 +69,10 @@ services:
       - .supporting/grafana/dashboard.yaml:/etc/grafana/provisioning/dashboards/main.yaml
       - .supporting/grafana/dashboards:/var/lib/grafana/dashboards
 
-
+networks:
+   creek:
+     name: creek
+     driver: bridge
 
 volumes:
   prom_data:

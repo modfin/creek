@@ -233,9 +233,9 @@ func (c *Container) Stop(ctx context.Context) error {
 	return c.C.Terminate(ctx)
 }
 
-func (c *Container) Terminate(ctx context.Context) error {
+func (c *Container) Terminate(ctx context.Context, options ...testcontainers.TerminateOption) error {
 	log.Println("postgres-test: Terminating container")
-	err := c.C.Terminate(ctx)
+	err := c.C.Terminate(ctx, options...)
 	return err
 }
 
