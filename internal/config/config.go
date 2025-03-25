@@ -1,52 +1,22 @@
 package config
 
 import (
-	"github.com/modfin/creek/internal/metrics"
-	"github.com/modfin/creek/internal/utils"
-	"io"
-	"sync"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 type Config struct {
-	LogLevel string `env:"LOG_LEVEL" envDefault:"info" yaml:"log_level"`
+	LogLevel string `cli:"log-level"`
 
-	PgUri             string        `env:"PG_URI,required" yaml:"pg_uri"`
-	PgPublicationName string        `env:"PG_PUBLICATION_NAME,required" yaml:"pg_publication_name"`
-	PgPublicationSlot string        `env:"PG_PUBLICATION_SLOT,required" yaml:"pg_publication_slot"`
-	PgMessageTimeout  time.Duration `env:"PG_MESSAGE_TIMEOUT" envDefault:"10s" yaml:"pg_message_timeout"`
-	PgTables          []string      `env:"PG_TABLES,required" envSeparator:" " yaml:"pg_tables"`
+	PgUri             string        `cli:"pg-uri"`
+	PgPublicationName string        `cli:"pg-publication-name"`
+	PgPublicationSlot string        `cli:"pg-publication-slot"`
+	PgMessageTimeout  time.Duration `cli:"pg-message-timeout"`
+	PgTables          []string      `cli:"tables"`
 
-	NatsUri        string        `env:"NATS_URI" yaml:"nats_uri"`
-	NatsTimeout    time.Duration `env:"NATS_TIMEOUT" envDefault:"30s" yaml:"nats_timeout"`
-	NatsMaxPending int           `env:"NATS_MAX_PENDING" envDefault:"4000" yaml:"nats_max_pending"`
-	NatsNameSpace  string        `env:"NATS_NAMESPACE" envDefault:"creek" yaml:"nats_namespace"`
+	NatsUri        string        `cli:"nats-uri"`
+	NatsTimeout    time.Duration `cli:"nats-timeout"`
+	NatsMaxPending int           `cli:"nats-max-pending"`
+	NatsNameSpace  string        `cli:"nats-namespace"`
 
-	PrometheusPort int `env:"PROMETHEUS_PORT" envDefault:"7779"`
-}
-
-var cfg Config
-var load sync.Once
-
-func Set(conf Config) {
-	cfg = conf
-}
-
-func Get() Config {
-
-	load.Do(func() {
-		ll, err := logrus.ParseLevel(cfg.LogLevel)
-		if err != nil {
-			ll = logrus.InfoLevel
-		}
-		limitedWriter := utils.NewRateLimitedWriter(60, 10, ll)
-		prometheusHook := metrics.MustNewPrometheusHook()
-		logrus.SetLevel(ll)
-		logrus.AddHook(prometheusHook)
-		logrus.AddHook(limitedWriter) // Writes to stdout with rate limit
-		logrus.SetOutput(io.Discard)  // Discard messages
-	})
-	return cfg
+	PrometheusPort int `cli:"prometheus-port"`
 }

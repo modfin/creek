@@ -1,18 +1,12 @@
-FROM golang:1.20-alpine3.17
+FROM golang:1.24
 
-RUN go install github.com/codeskyblue/fswatch@v0.0.0-20200812032752-892e1e55b602
+RUN apt-get update && apt-get install -y inotify-hookable
+RUN go install github.com/codeskyblue/fswatch@latest
 
-ARG UID
-ARG USER
+RUN mkdir -p /creek
+WORKDIR /creek
 
-RUN if test "$USER" != 'root'; then adduser --disabled-password --uid "$UID" "$USER"; fi
-RUN chown -R ${UID} /go/pkg
-RUN chmod -R +w /go/pkg
-
-USER $USER
-
-RUN mkdir -p /go/src/creek/
-WORKDIR /go/src/creek
+EXPOSE 7779
 
 # run fswatch
-CMD cd /go/src/creek && fswatch -config ./fsw.yml
+CMD cd /creek && fswatch -config /fsw.yml

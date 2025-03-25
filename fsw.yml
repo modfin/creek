@@ -3,9 +3,13 @@ triggers:
   - name: ''
     pattens:
       - '**/*.go'
+      - '**/*.html'
+      - '**/*.css'
+      - './api.yaml'
+      - '!**/*_test.go'
     env:
       DEBUG: '1'
-    cmd: cd /go/src/creek && go run ./cmd/creekd.go
+    cmd: go run ./cmd/creekd.go
     shell: true
     delay: 100ms
     stop_timeout: 500ms

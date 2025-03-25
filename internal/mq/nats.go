@@ -5,13 +5,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/modfin/henry/slicez"
 	"sync"
 
 	"github.com/modfin/creek"
 
 	"github.com/modfin/creek/internal/dao"
 
-	"github.com/modfin/henry/exp/numberz"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/sirupsen/logrus"
@@ -172,7 +172,7 @@ func (mq *MQ) startBus() {
 			}
 			ii := int(i)
 			// TODO integration_tests off by 1 stuff....
-			packet = append(packet, m.data[ii*maxPayload:numberz.Min((ii+1)*maxPayload, len(m.data))]...)
+			packet = append(packet, m.data[ii*maxPayload:slicez.Min((ii+1)*maxPayload, len(m.data))]...)
 
 			publish(m.subject, packet)
 		}

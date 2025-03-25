@@ -1,11 +1,12 @@
-FROM golang:1.20-alpine as builder
+FROM golang:1.24-alpine as builder
 
-COPY . /go/src/creek
-WORKDIR /go/src/creek
+COPY . /creek
+WORKDIR /creek
 
 RUN go mod download
 RUN go build -o /creekd cmd/creekd.go
 
-FROM alpine
+FROM --platform=linux/amd64 alpine:3.21.3
+
 COPY --from=builder /creekd /
 ENTRYPOINT [ "/creekd" ]

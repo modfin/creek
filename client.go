@@ -248,10 +248,10 @@ func (c *Conn) StreamWALFrom(ctx context.Context, database string, table string,
 		return walMsg, done, nil
 	})
 
-	msgChan = chanz.DropWhile1(msgChan, func(msg WAL) bool {
+	msgChan = chanz.DropWhile(msgChan, func(msg WAL) bool {
 		msgLSN, _ := parseLSN(msg.Source.LSN)
 		return msgLSN <= parsedLSN
-	})
+	}, chanz.OpBuffer(1))
 
 	return &WALStream{msgs: msgChan, close: closeChan}, nil
 }
