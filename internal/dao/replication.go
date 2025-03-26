@@ -170,8 +170,8 @@ func (r *Replication) start() {
 			}
 
 			logrus.Info("restarting replication")
-			err = pglogrepl.StartReplication(ctx, r.conn, r.parent.cfg.PgPublicationSlot, pglogrepl.LSN(0),
-				pglogrepl.StartReplicationOptions{PluginArgs: []string{"proto_version '1'", fmt.Sprintf("publication_names '%s'", r.parent.cfg.PgPublicationName)}})
+			err = pglogrepl.StartReplication(ctx, r.conn, r.parent.cfg.PgConfig.PublicationSlot, pglogrepl.LSN(0),
+				pglogrepl.StartReplicationOptions{PluginArgs: []string{"proto_version '1'", fmt.Sprintf("publication_names '%s'", r.parent.cfg.PgConfig.PublicationName)}})
 			if err != nil {
 				logrus.Errorf("failed to start replication: %v", err)
 			}
@@ -186,9 +186,9 @@ func (r *Replication) start() {
 				logrus.Errorf("failed ack CopyDone message: %v", err)
 			}
 
-			err = pglogrepl.StartReplication(ctx, r.conn, r.parent.cfg.PgPublicationSlot, res.LSN,
+			err = pglogrepl.StartReplication(ctx, r.conn, r.parent.cfg.PgConfig.PublicationSlot, res.LSN,
 				pglogrepl.StartReplicationOptions{
-					PluginArgs: []string{"proto_version '1'", fmt.Sprintf("publication_names '%s'", r.parent.cfg.PgPublicationName)},
+					PluginArgs: []string{"proto_version '1'", fmt.Sprintf("publication_names '%s'", r.parent.cfg.PgConfig.PublicationName)},
 					Timeline:   res.Timeline})
 			if err != nil {
 				logrus.Errorf("failed to restart replication: %v.", err)
@@ -587,7 +587,7 @@ func (r *Replication) tryConnect() (err error) {
 	b.MaxElapsedTime = 1<<63 - 1
 
 	operation := func() (*pgconn.PgConn, error) {
-		conn, _, err := r.parent.connectSlot(context.Background(), r.parent.cfg.PgPublicationSlot, r.parent.cfg.PgPublicationName)
+		conn, _, err := r.parent.connectSlot(context.Background(), r.parent.cfg.PgConfig.PublicationSlot, r.parent.cfg.PgConfig.PublicationName)
 		return conn, err
 	}
 

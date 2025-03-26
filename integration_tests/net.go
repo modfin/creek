@@ -3,8 +3,8 @@ package integration_tests
 import (
 	"context"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/sirupsen/logrus"
 )
@@ -17,7 +17,7 @@ func setupTestNetwork(dockerNetworkName string) error {
 	ctx := context.Background()
 	cli.NegotiateAPIVersion(ctx)
 
-	networks, err := cli.NetworkList(ctx, types.NetworkListOptions{
+	networks, err := cli.NetworkList(ctx, network.ListOptions{
 		Filters: filters.NewArgs(filters.Arg("name", dockerNetworkName)),
 	})
 	if err != nil {
@@ -31,11 +31,9 @@ func setupTestNetwork(dockerNetworkName string) error {
 	}
 
 	// Create test network bridge...
-	res, err := cli.NetworkCreate(ctx, dockerNetworkName, types.NetworkCreate{
-		CheckDuplicate: true,     // bool
-		Driver:         "bridge", // string
-		Scope:          "local",  // string
-		Attachable:     true,     // bool
+	res, err := cli.NetworkCreate(ctx, dockerNetworkName, network.CreateOptions{
+		Driver: "bridge", // string
+		Scope:  "local",  // string
 	})
 	if err != nil {
 		return err

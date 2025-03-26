@@ -1,6 +1,7 @@
 package creek
 
 import (
+	"fmt"
 	"time"
 
 	pgtypeavro "github.com/modfin/creek/pgtype-avro"
@@ -46,12 +47,12 @@ type WAL struct {
 
 // FullIdentifier returns the full identifier of the WAL message, ie db.namespace.table
 func (w WAL) FullIdentifier() string {
-	return w.Source.DB + "." + w.Source.Schema + "." + w.Source.Table
+	return fmt.Sprintf("%s.%s.%s", w.Source.DB, w.Source.Schema, w.Source.Table)
 }
 
 // LocalIdentifier returns the local identifier of the WAL message, ie namespace.table
 func (w WAL) LocalIdentifier() string {
-	return w.Source.Schema + "." + w.Source.Table
+	return fmt.Sprintf("%s.%s", w.Source.Schema, w.Source.Table)
 }
 
 // AvroSchema returns a full WAL message Avro schema based on the before and after schemas

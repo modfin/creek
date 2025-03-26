@@ -1,52 +1,38 @@
 package config
 
 import (
-	"github.com/modfin/creek/internal/metrics"
-	"github.com/modfin/creek/internal/utils"
-	"io"
-	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 type Config struct {
-	LogLevel string `env:"LOG_LEVEL" envDefault:"info" yaml:"log_level"`
-
-	PgUri             string        `env:"PG_URI,required" yaml:"pg_uri"`
-	PgPublicationName string        `env:"PG_PUBLICATION_NAME,required" yaml:"pg_publication_name"`
-	PgPublicationSlot string        `env:"PG_PUBLICATION_SLOT,required" yaml:"pg_publication_slot"`
-	PgMessageTimeout  time.Duration `env:"PG_MESSAGE_TIMEOUT" envDefault:"10s" yaml:"pg_message_timeout"`
-	PgTables          []string      `env:"PG_TABLES,required" envSeparator:" " yaml:"pg_tables"`
-
-	NatsUri        string        `env:"NATS_URI" yaml:"nats_uri"`
-	NatsTimeout    time.Duration `env:"NATS_TIMEOUT" envDefault:"30s" yaml:"nats_timeout"`
-	NatsMaxPending int           `env:"NATS_MAX_PENDING" envDefault:"4000" yaml:"nats_max_pending"`
-	NatsNameSpace  string        `env:"NATS_NAMESPACE" envDefault:"creek" yaml:"nats_namespace"`
-
-	PrometheusPort int `env:"PROMETHEUS_PORT" envDefault:"7779"`
+	LogLevel       string     `cli:"log-level"`
+	Tables         []string   `cli:"tables"`
+	PgConfig       PgConfig   `cli-prefix:"pg-"`
+	NatsConfig     NatsConfig `cli-prefix:"nats-"`
+	PrometheusPort int        `cli:"prometheus-port"`
 }
 
-var cfg Config
-var load sync.Once
-
-func Set(conf Config) {
-	cfg = conf
+type NatsConfig struct {
+	Uri        string          `cli:"uri"`
+	Timeout    time.Duration   `cli:"timeout"`
+	MaxPending int             `cli:"max-pending"`
+	NameSpace  string          `cli:"namespace"`
+	Retention  RetentionConfig `cli-prefix:"retention-"`
+	Replicas   int             `cli:"replicas"`
 }
 
-func Get() Config {
+type RetentionConfig struct {
+	Policy   jetstream.RetentionPolicy `cli:"policy"`
+	MaxAge   time.Duration             `cli:"max-age"`
+	MaxBytes int64                     `cli:"max-bytes"`
+	MaxMsgs  int64                     `cli:"max-msgs"`
+}
 
-	load.Do(func() {
-		ll, err := logrus.ParseLevel(cfg.LogLevel)
-		if err != nil {
-			ll = logrus.InfoLevel
-		}
-		limitedWriter := utils.NewRateLimitedWriter(60, 10, ll)
-		prometheusHook := metrics.MustNewPrometheusHook()
-		logrus.SetLevel(ll)
-		logrus.AddHook(prometheusHook)
-		logrus.AddHook(limitedWriter) // Writes to stdout with rate limit
-		logrus.SetOutput(io.Discard)  // Discard messages
-	})
-	return cfg
+type PgConfig struct {
+	Uri             string        `cli:"uri"`
+	PublicationName string        `cli:"publication-name"`
+	PublicationSlot string        `cli:"publication-slot"`
+	MessageTimeout  time.Duration `cli:"message-timeout"`
 }

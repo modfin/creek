@@ -21,9 +21,9 @@ func (mq *MQ) StartSchemaAPI() error {
 
 func (mq *MQ) startSchemaLookupService() error {
 
-	logrus.Infof("listening on %s._schema for schema requests", mq.root)
+	logrus.Infof("listening on %s for schema requests", mq.streamName(creek.SchemaStream))
 
-	sub, err := mq.conn.Subscribe(fmt.Sprintf("%s._schema", mq.root), func(m *nats.Msg) {
+	sub, err := mq.conn.Subscribe(mq.streamName(creek.SchemaStream), func(m *nats.Msg) {
 		if m.Reply == "" {
 			return
 		}
@@ -78,7 +78,7 @@ func (mq *MQ) StartSchemaStream(stream <-chan creek.SchemaMsg) *SchemaStream {
 			}
 
 			mq.publishBus <- msg{
-				subject: fmt.Sprintf("%s.%s.%s", mq.ns, creek.SchemaStream, schema.Source),
+				subject: fmt.Sprintf("%s.%s", mq.streamName(creek.SchemaStream), schema.Source),
 				data:    b,
 			}
 

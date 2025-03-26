@@ -2,6 +2,8 @@ version: '3.0'
 
 services:
   creek-producer:
+    networks:
+      - creek
     build:
       dockerfile: Dockerfile.dev
       context: .
@@ -9,50 +11,57 @@ services:
         UID: ${UID}
         USER: ${USER}
     environment:
-      PG_URI:  ""
-      PG_PUBLICATION_NAME: "creek" # Postgres publication name
-      PG_PUBLICATION_SLOT: "creek_0" # Postgres publication slot name
-      PG_TABLES: ""
-      NATS_URI: "nats://nats-server:4222" # NATS url
-      NATS_NAMESPACE: "CREEK" # Name of the NATS JetStream Stream
+      PG_URI: ""
+      PG_PUBLICATION_NAME: creek_pub
+      PG_PUBLICATION_SLOT: creek_slot
+      PG_TABLES: public.fx_sek
+      NATS_URI: nats://nats:4222
+      NATS_NAMESPACE: CREEK
+      NATS_MAX_PENDING: 4000
+      NATS_TIMEOUT: 30s
+      NATS_RETENTION_MAX_AGE: 24h
     volumes:
-      - .:/go/src/creek
-      - gopkg:/go/pkg
-    networks: ["creek"]
+      - .:/creek
+      - gopkg-creek:/go/pkg
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "7779:7779"
 
-  nats-server:
+  nats:
     image: nats
+    networks:
+      - creek
     ports:
       - "8222:8222"
       - "4222:4222"
     command: "--http_port 8222 -js"
-    networks: ["creek"]
 
   nats-exporter:
-    image: natsio/prometheus-nats-exporter
+    image: natsio/prometheus-nats-exporter:0.16.0
+    networks:
+      - creek
     ports:
       - "7777:7777"
-    networks: ["creek"]
-    command: "-varz -jsz=all http://nats-server:8222"
+    command: "-varz -healthz -connz -jsz=all http://nats:8222"
     depends_on:
-      - nats-server
+      - nats
+
   prometheus:
     image: prom/prometheus
+    networks:
+      - creek
     volumes:
       - .supporting/prometheus:/etc/prometheus
       - prom_data:/prometheus
-    networks: ["creek"]
     ports:
       - "9090:9090"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
   grafana:
     image: grafana/grafana
-    networks: ["creek"]
+    networks:
+      - creek
     ports:
       - 3000:3000
     volumes:
@@ -60,14 +69,12 @@ services:
       - .supporting/grafana/dashboard.yaml:/etc/grafana/provisioning/dashboards/main.yaml
       - .supporting/grafana/dashboards:/var/lib/grafana/dashboards
 
-
-
 networks:
-  creek:
-    name: creek
-    driver: bridge
+   creek:
+     name: creek
+     driver: bridge
 
 volumes:
   prom_data:
   producer_data:
-  gopkg:
+  gopkg-creek:
