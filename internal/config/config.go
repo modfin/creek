@@ -15,12 +15,11 @@ type Config struct {
 }
 
 type NatsConfig struct {
-	Uri        string          `cli:"uri"`
-	Timeout    time.Duration   `cli:"timeout"`
-	MaxPending int             `cli:"max-pending"`
-	NameSpace  string          `cli:"namespace"`
-	Retention  RetentionConfig `cli-prefix:"retention-"`
-	Replicas   int             `cli:"replicas"`
+	Uri       string          `cli:"uri"`
+	Timeout   time.Duration   `cli:"timeout"`
+	NameSpace string          `cli:"namespace"`
+	Retention RetentionConfig `cli-prefix:"retention-"`
+	Replicas  int             `cli:"replicas"`
 }
 
 type RetentionConfig struct {

@@ -61,10 +61,10 @@ func (mq *MQ) StartWalStream(stream <-chan creek.WAL) *WalStream {
 				b, _ := json.Marshal(wal)
 				logrus.Tracef("sending message to %s: %s", fmt.Sprintf("%s.%s", mq.streamName(creek.WalStream), wal.LocalIdentifier()), string(b))
 			}
-
-			mq.publishBus <- msg{
-				subject: fmt.Sprintf("%s.%s", mq.streamName(creek.WalStream), wal.LocalIdentifier()),
-				data:    data,
+			mq.walBus <- msg{
+				subject:    fmt.Sprintf("%s.%s", mq.streamName(creek.WalStream), wal.LocalIdentifier()),
+				data:       data,
+				identifier: wal.Source.LSN,
 			}
 
 		}

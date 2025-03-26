@@ -31,12 +31,12 @@ type Replication struct {
 
 	intx bool
 
-	conn     *pgconn.PgConn
-	currLSN  pglogrepl.LSN
-	prevLSN  pglogrepl.LSN
-	xlogPos  pglogrepl.LSN
-	txid     uint32
-	commitAt time.Time
+	conn         *pgconn.PgConn
+	AckedLSN     pglogrepl.LSN
+	prevAckedLSN pglogrepl.LSN
+	CurrentLSN   pglogrepl.LSN
+	txid         uint32
+	commitAt     time.Time
 
 	messages       chan creek.WAL
 	schemaMessages chan creek.SchemaMsg
@@ -86,15 +86,15 @@ func (r *Replication) Done() <-chan struct{} {
 }
 
 func (r *Replication) sendStatusUpdate() {
-	err := pglogrepl.SendStandbyStatusUpdate(r.ctx, r.conn, pglogrepl.StandbyStatusUpdate{WALWritePosition: r.xlogPos})
+	err := pglogrepl.SendStandbyStatusUpdate(r.ctx, r.conn, pglogrepl.StandbyStatusUpdate{WALWritePosition: r.CurrentLSN})
 	if err != nil {
 		logrus.Errorln("SendStandbyStatusUpdate failed:", err)
 	}
-	logrus.Tracef("Sent Standby status message with lsn: %s", r.xlogPos)
+	logrus.Tracef("Sent Standby status message with lsn: %s", r.CurrentLSN)
 }
 
 func (r *Replication) start() {
-
+	// The timeout forces a pgConnTimeout every 5 seconds to ensure ACK of the replication slot
 	timeout := time.Now().Add(time.Second * 5)
 
 	for {
@@ -126,8 +126,8 @@ func (r *Replication) start() {
 		if pgconn.Timeout(err) {
 			r.sendStatusUpdate()
 			last, err := r.parent.GetCurrLSN()
-			if err == nil && r.xlogPos != 0 {
-				metrics.SetBehindLSN(last, r.xlogPos)
+			if err == nil && r.CurrentLSN != 0 {
+				metrics.SetBehindLSN(last, r.CurrentLSN)
 			}
 			timeout = time.Now().Add(time.Second * 5)
 			continue
@@ -144,6 +144,7 @@ func (r *Replication) start() {
 				cancel()
 			}
 
+			// continue to next iteration to try again if we successfully reconnected or to exit if context is cancelled
 			continue
 		}
 
@@ -178,8 +179,7 @@ func (r *Replication) start() {
 			continue
 		}
 
-		_, ok := rawMsg.(*pgproto3.CopyDone)
-		if ok {
+		if _, ok := rawMsg.(*pgproto3.CopyDone); ok {
 			logrus.Info("received CopyDone message from backend")
 			res, err := pglogrepl.SendStandbyCopyDone(r.ctx, r.conn)
 			if err != nil {
@@ -216,8 +216,8 @@ func (r *Replication) start() {
 				"ServerTime:", pkm.ServerTime,
 				"ReplyRequested:", pkm.ReplyRequested)
 
-			if pkm.ServerWALEnd > r.xlogPos {
-				r.xlogPos = pkm.ServerWALEnd
+			if pkm.ServerWALEnd > r.CurrentLSN {
+				r.CurrentLSN = pkm.ServerWALEnd
 			}
 
 			last, err := r.parent.GetCurrLSN()
@@ -239,8 +239,8 @@ func (r *Replication) start() {
 				logrus.Errorf("ParseXLogData failed: %v", err)
 				continue
 			}
-			if xld.WALStart > r.xlogPos {
-				r.xlogPos = xld.WALStart
+			if xld.WALStart > r.CurrentLSN {
+				r.CurrentLSN = xld.WALStart
 			}
 
 			logrus.Tracef("XLogData => WALStart %s ServerWALEnd %s ServerTime %s WALData:\n%s\n", xld.WALStart, xld.ServerWALEnd, xld.ServerTime, hex.Dump(xld.WALData))
@@ -252,7 +252,7 @@ func (r *Replication) start() {
 				logrus.Errorf("parse logical replication message: %v", err)
 				continue
 			}
-			logrus.Debugf("Received a logical replication message: [LSN: %s, %s]\n", r.currLSN, logicalMsg.Type())
+			logrus.Debugf("Received a logical replication message: [CurrentLSN: %s, %s]\n", r.AckedLSN, logicalMsg.Type())
 
 			switch logicalMsg := logicalMsg.(type) {
 			case *pglogrepl.BeginMessage:
@@ -309,8 +309,8 @@ func (r *Replication) start() {
 func (r *Replication) handleBeginMessage(msg *pglogrepl.BeginMessage) {
 	// Indicates the beginning of a group of changes in a transaction. This is only sent for committed transactions.
 	// You won't get any events from rolled back transactions.
-	r.prevLSN = r.currLSN
-	r.currLSN = msg.FinalLSN
+	r.prevAckedLSN = r.AckedLSN
+	r.AckedLSN = msg.FinalLSN
 	r.commitAt = msg.CommitTime
 	r.txid = msg.Xid
 }
@@ -568,14 +568,13 @@ func (r *Replication) baseMessage(rel Relation) creek.WAL {
 	msg := creek.WAL{
 		Fingerprint: rel.fingerprint,
 		Source: creek.MessageSource{
-			Name:    "dummy",
-			TxAt:    r.commitAt,
-			DB:      r.parent.config.ConnConfig.Database,
-			Schema:  rel.Msg.Namespace,
-			Table:   rel.Msg.RelationName,
-			TxId:    r.txid,
-			LastLSN: r.prevLSN.String(),
-			LSN:     r.currLSN.String(),
+			Name:   "dummy", // TODO: hmmm what is this?
+			TxAt:   r.commitAt,
+			DB:     r.parent.config.ConnConfig.Database,
+			Schema: rel.Msg.Namespace,
+			Table:  rel.Msg.RelationName,
+			TxId:   r.txid,
+			LSN:    r.CurrentLSN.String(),
 		},
 	}
 	return msg
