@@ -53,10 +53,9 @@ func GetConfig() config.Config {
 		},
 		Tables: []string{"public.types_data", "public.other", "public.types", "public.prices"},
 		NatsConfig: config.NatsConfig{
-			Uri:        GetNATSURL(),
-			Timeout:    time.Second * 10,
-			MaxPending: 100,
-			NameSpace:  "CREEK",
+			Uri:       GetNATSURL(),
+			Timeout:   time.Second * 10,
+			NameSpace: "CREEK",
 			Retention: config.RetentionConfig{
 				Policy:   jetstream.LimitsPolicy,
 				MaxAge:   0,
@@ -86,7 +85,7 @@ func EnsureStarted() {
 			logrus.Fatal("failed to connect to database: ", err)
 		}
 
-		queue, err := mq.New(testCtx, cfg.NatsConfig.Uri, cfg.NatsConfig.NameSpace, cfg.NatsConfig.MaxPending, db)
+		queue, err := mq.New(testCtx, cfg.NatsConfig.Uri, cfg.NatsConfig.NameSpace, db)
 		if err != nil {
 			logrus.Fatal("failed to initialize nats: ", err)
 		}

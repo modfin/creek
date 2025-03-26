@@ -3,7 +3,6 @@ package mq
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -84,7 +83,7 @@ func (mq *MQ) assignStream(_type creek.StreamType) error {
 	return nil
 }
 
-func New(ctx context.Context, uri string, root string, maxPending int, db *dao.DB) (*MQ, error) {
+func New(ctx context.Context, uri string, root string, db *dao.DB) (*MQ, error) {
 	var err error
 	mq := &MQ{
 		ctx:        ctx,
@@ -97,38 +96,12 @@ func New(ctx context.Context, uri string, root string, maxPending int, db *dao.D
 		snapsDone:  make(chan struct{}),
 	}
 
-	hostname, err := os.Hostname()
+	err = mq.connect()
 	if err != nil {
 		return nil, err
-	}
-	hostname = strings.Split(hostname, ".")[0]
-
-	opts := []nats.Option{
-		nats.Name(hostname),
-		nats.PingInterval(2 * time.Second),
-		nats.MaxReconnects(-1),
-	}
-
-	mq.uri = uri
-	mq.conn, err = nats.Connect(uri, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	mq.js, err = jetstream.New(mq.conn, jetstream.WithPublishAsyncMaxPending(maxPending))
-	if err != nil {
-		return nil, err
-	}
-
-	for _, t := range []creek.StreamType{creek.WalStream, creek.SnapStream, creek.SchemaStream} {
-		err = mq.assignStream(t)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	go mq.startBus()
-
 	go func() {
 		<-ctx.Done()
 		mq.snapWg.Wait()
@@ -154,24 +127,46 @@ func (mq *MQ) Done() <-chan struct{} {
 	return mq.doneChan
 }
 
-func (mq *MQ) startBus() {
-	maxPayload := int(mq.conn.MaxPayload()) - 2 - 4 - 1
+func (mq *MQ) connect() error {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return fmt.Errorf("could not get hostname, err %v", err)
+	}
+	hostname = strings.Split(hostname, ".")[0]
+	opts := []nats.Option{
+		nats.Name(hostname),
+		nats.PingInterval(2 * time.Second),
+		nats.RetryOnFailedConnect(true),
+		nats.MaxReconnects(-1),
+		nats.ReconnectHandler(func(conn *nats.Conn) {
+			logrus.Info("reconnected to nats")
+		}),
+		nats.DisconnectErrHandler(func(conn *nats.Conn, err error) {
+			logrus.Errorf("disconnected from nats: %v", err)
+		}),
+	}
+	logrus.Infof("connecting to nats %s", mq.uri)
+	mq.conn, err = nats.Connect(mq.uri, opts...)
+	if err != nil {
+		return fmt.Errorf("could not connect to nats, err %v", err)
+	}
 
-	publish := func(subject string, data []byte) {
-		for {
-			_, err := mq.js.PublishAsync(subject, data)
-			if errors.Is(err, jetstream.ErrTooManyStalledMsgs) {
-				logrus.Tracef("nats async buffer is full, waiting to compleat")
-				<-mq.js.PublishAsyncComplete()
-				logrus.Tracef("nats async buffer is empty, continuing")
-				continue
-			}
-			if err != nil {
-				logrus.Errorf("could not publish to nats on %s, err %v", subject, err)
-			}
-			break
+	mq.js, err = jetstream.New(mq.conn)
+	if err != nil {
+		return fmt.Errorf("could not create jetstream, err %v", err)
+	}
+
+	for _, t := range []creek.StreamType{creek.WalStream, creek.SnapStream, creek.SchemaStream} {
+		err = mq.assignStream(t)
+		if err != nil {
+			return fmt.Errorf("could not assign stream, err %v", err)
 		}
 	}
+	return nil
+}
+
+func (mq *MQ) startBus() {
+	maxPayload := int(mq.conn.MaxPayload()) - 2 - 4 - 1
 
 	for m := range mq.publishBus {
 		length := make([]byte, 4)
@@ -190,9 +185,46 @@ func (mq *MQ) startBus() {
 			// TODO integration_tests off by 1 stuff....
 			packet = append(packet, m.data[ii*maxPayload:slicez.Min((ii+1)*maxPayload, len(m.data))]...)
 
-			publish(m.subject, packet)
+		sendLoop:
+			for {
+				_, err := mq.js.Publish(mq.ctx, m.subject, packet)
+				if err != nil {
+					logrus.Errorf("could not publish to nats on %s, err %v", m.subject, err)
+					mq.reconnector()
+				} else {
+					break sendLoop
+				}
+			}
 		}
 	}
 	logrus.Info("closed publish bus")
 	mq.doneChan <- struct{}{}
+}
+
+func (mq *MQ) reconnector() {
+	if !mq.conn.IsReconnecting() {
+		err := mq.conn.ForceReconnect()
+		// function code never return error
+		if err != nil {
+			logrus.Errorf("could not force reconnection")
+		}
+	}
+	for {
+		select {
+		case <-mq.doneChan:
+			return
+		case <-mq.conn.StatusChanged(nats.CONNECTED):
+			return
+		case <-time.After(time.Second * 10):
+			if mq.conn.IsConnected() {
+				logrus.Info("reconnected to nats")
+				return
+			}
+			logrus.Warn("failed to reconnect to nats, tries again")
+			err := mq.conn.ForceReconnect()
+			if err != nil {
+				logrus.Errorf("could not force reconnection")
+			}
+		}
+	}
 }
