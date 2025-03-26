@@ -106,6 +106,7 @@ func New(ctx context.Context, uri string, root string, maxPending int, db *dao.D
 	opts := []nats.Option{
 		nats.Name(hostname),
 		nats.PingInterval(2 * time.Second),
+		nats.MaxReconnects(-1),
 	}
 
 	mq.uri = uri

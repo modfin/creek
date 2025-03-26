@@ -142,6 +142,7 @@ func (c *Client) Connect(ctx context.Context) (*Conn, error) {
 	opts := []nats.Option{
 		nats.Name(hostname),
 		nats.PingInterval(2 * time.Second),
+		nats.MaxReconnects(-1),
 	}
 	c.natsOpts = append(opts, c.natsOpts...)
 
@@ -217,7 +218,7 @@ type WALStream struct {
 	close chan struct{}
 }
 
-// StreamWALFrom opens a consumer for the database and table topic. The table topic should be in the form `<STEAM_NAME>.<DATABASE_SCHEMA>.<DATABASE_TABLE>`.
+// StreamWALFrom opens a consumer for the database and table topic. The table topic should be in the form `<STREAM_NAME>.<DATABASE_SCHEMA>.<DATABASE_TABLE>`.
 // Starts streaming from the first message with the timestamp AND log sequence number (lsn) that is greater than the one provided.
 func (c *Conn) StreamWALFrom(ctx context.Context, tableSchema string, table string, timestamp time.Time, lsn string) (stream *WALStream, err error) {
 	topic := fmt.Sprintf("%s.%s.%s", c.parent.GetStreamName(WalStream), tableSchema, table)
@@ -275,7 +276,7 @@ func (c *Conn) StreamWALFrom(ctx context.Context, tableSchema string, table stri
 	return &WALStream{msgs: msgChan, close: closeChan}, nil
 }
 
-// StreamWAL opens a consumer for the database and table topic. The table topic should be in the form `<STEAM_NAME>.<DATABASE_SCHEMA>.<DATABASE_TABLE>`.
+// StreamWAL opens a consumer for the database and table topic. The table topic should be in the form `<STREAM_NAME>.<DATABASE_SCHEMA>.<DATABASE_TABLE>`.
 func (c *Conn) StreamWAL(ctx context.Context, tableSchema string, table string) (stream *WALStream, err error) {
 	topic := fmt.Sprintf("%s.%s.%s", c.parent.GetStreamName(WalStream), tableSchema, table)
 	c.parent.log.Info(fmt.Sprintf("starting streaming WAL messages on topic %s", topic))

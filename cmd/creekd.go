@@ -51,7 +51,7 @@ func main() {
 			&cli.IntFlag{Name: "nats-retention-policy", Value: 0, Sources: cli.EnvVars("NATS_RETENTION_POLICY")},
 			&cli.DurationFlag{Name: "nats-retention-max-age", Value: 0, Sources: cli.EnvVars("NATS_RETENTION_MAX_AGE")},
 			&cli.IntFlag{Name: "nats-retention-max-bytes", Value: 0, Sources: cli.EnvVars("NATS_RETENTION_MAX_BYTES")},
-			&cli.IntFlag{Name: "nats-retention-max-msgs", Value: 0, Sources: cli.EnvVars("NATS_RETENTION_LIMIT_MAX_MSGS")},
+			&cli.IntFlag{Name: "nats-retention-max-msgs", Value: 0, Sources: cli.EnvVars("NATS_RETENTION_MAX_MSGS")},
 		},
 		Action: serve,
 	}
