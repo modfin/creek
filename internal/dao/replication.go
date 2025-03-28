@@ -94,7 +94,7 @@ func (r *Replication) sendStatusUpdate() {
 }
 
 func (r *Replication) start() {
-
+	// The timeout forces a pgConnTimeout every 5 seconds to ensure ACK of the replication slot
 	timeout := time.Now().Add(time.Second * 5)
 
 	for {
@@ -144,6 +144,7 @@ func (r *Replication) start() {
 				cancel()
 			}
 
+			// continue to next iteration to try again if we successfully reconnected or to exit if context is cancelled
 			continue
 		}
 
@@ -178,8 +179,7 @@ func (r *Replication) start() {
 			continue
 		}
 
-		_, ok := rawMsg.(*pgproto3.CopyDone)
-		if ok {
+		if _, ok := rawMsg.(*pgproto3.CopyDone); ok {
 			logrus.Info("received CopyDone message from backend")
 			res, err := pglogrepl.SendStandbyCopyDone(r.ctx, r.conn)
 			if err != nil {
@@ -568,7 +568,7 @@ func (r *Replication) baseMessage(rel Relation) creek.WAL {
 	msg := creek.WAL{
 		Fingerprint: rel.fingerprint,
 		Source: creek.MessageSource{
-			Name:    "dummy",
+			Name:    "dummy", // TODO: hmmm what is this?
 			TxAt:    r.commitAt,
 			DB:      r.parent.config.ConnConfig.Database,
 			Schema:  rel.Msg.Namespace,

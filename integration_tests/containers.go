@@ -3,6 +3,11 @@ package integration_tests
 import (
 	"context"
 	"fmt"
+	"log"
+	"regexp"
+	"sync"
+	"time"
+
 	toxiproxy "github.com/Shopify/toxiproxy/v2/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -11,10 +16,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"log"
-	"regexp"
-	"sync"
-	"time"
 )
 
 var (
@@ -23,6 +24,8 @@ var (
 	testsStarted  time.Time
 	toxiProxy     *proxy.Container
 	dbProxi       *toxiproxy.Proxy
+	// Fixed port for NATS to ensure consistent connection URL
+	natsPort = "14222"
 )
 
 const DBname = "test_db"
@@ -85,36 +88,72 @@ func startNats(ctx context.Context, dockerNetworkName string, wg *sync.WaitGroup
 	defer wg.Done()
 
 	startTime := time.Now()
-	log.Println("Starting up integration_tests container...")
+	log.Println("Starting up NATS container...")
 	var err error
-	var ports = []string{"4222", "8222"}
 
-	strategy := wait.NewHTTPStrategy("/healthz").WithStartupTimeout(time.Second * 2).WithPort("8222").WithMethod("GET")
+	// Define fixed host port for NATS
+	natsClientPort := natsPort
+	natsMonitorPort := "18222"
+
+	// Define the exposed ports with explicit host:container mapping
+	exposedPorts := []string{
+		fmt.Sprintf("%s:4222/tcp", natsClientPort),
+		fmt.Sprintf("%s:8222/tcp", natsMonitorPort),
+	}
+
+	log.Printf("Setting up NATS with exposed ports: %v", exposedPorts)
+
+	strategy := wait.NewHTTPStrategy("/healthz").WithStartupTimeout(time.Second * 5).WithPort("8222").WithMethod("GET")
 
 	req := testcontainers.ContainerRequest{
 		Image:        "nats",
 		Name:         "nats-integration_tests",
 		Hostname:     "nats-integration_tests",
-		ExposedPorts: ports,
+		ExposedPorts: exposedPorts,
 		WaitingFor:   strategy,
 		Networks:     []string{dockerNetworkName},
 		Cmd:          []string{"-p", "4222", "--http_port", "8222", "-js"},
 	}
+
 	log.Println("Sending request...")
 	natsContainer, err = testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
 		Started:          true,
+		Reuse:            true,
+		ProviderType:     testcontainers.ProviderDocker,
 	})
 	if err != nil {
-		panic(err)
+		*b = true
+		logrus.Errorf("Failed to start NATS container: %v", err)
+		return
 	}
 
-	log.Printf("nats-integration_tests integration_tests container started (%v)\n", time.Since(startTime))
+	// Verify the port mappings
+	clientNatPort := nat.Port("4222/tcp")
+	mappedClientPort, err := natsContainer.MappedPort(ctx, clientNatPort)
+	if err != nil {
+		logrus.Warnf("Could not get mapped port for client port: %v", err)
+	} else {
+		log.Printf("NATS client port mapped to host port %s", mappedClientPort.Port())
+		if mappedClientPort.Port() != natsClientPort {
+			logrus.Warnf("Expected NATS client port to be %s but got %s", natsClientPort, mappedClientPort.Port())
+		}
+	}
+
+	monitorNatPort := nat.Port("8222/tcp")
+	mappedMonitorPort, err := natsContainer.MappedPort(ctx, monitorNatPort)
+	if err != nil {
+		logrus.Warnf("Could not get mapped port for monitor port: %v", err)
+	} else {
+		log.Printf("NATS monitor port mapped to host port %s", mappedMonitorPort.Port())
+	}
+
+	log.Printf("NATS container started (%v)\n", time.Since(startTime))
 }
 
 func GetNATSURL() string {
-	p, _ := natsContainer.MappedPort(TimeoutContext(time.Second*1), nat.Port("4222"))
-	return "nats://127.0.0.1:" + p.Port()
+	// Return URL with the fixed port
+	return "nats://127.0.0.1:" + natsPort
 }
 
 func GetDBURL() string {
@@ -141,6 +180,22 @@ func GetPgContainer() *dbc.Container {
 
 func ResetContainer() error {
 	return postgres.RestartInCurrentCtx()
+}
+
+func StopNatsContainer(ctx context.Context) error {
+	if natsContainer.IsRunning() {
+		err := natsContainer.Stop(ctx, nil)
+		return err
+	}
+	return nil
+}
+
+func StartNatsContainer(ctx context.Context) error {
+	if !natsContainer.IsRunning() {
+		err := natsContainer.Start(ctx)
+		return err
+	}
+	return nil
 }
 
 func LoadSql(files ...string) {

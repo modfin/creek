@@ -44,7 +44,6 @@ func main() {
 			&cli.StringSliceFlag{Name: "tables", Sources: cli.EnvVars("PG_TABLES")},
 			&cli.StringFlag{Name: "nats-uri", Sources: cli.EnvVars("NATS_URI")},
 			&cli.DurationFlag{Name: "nats-timeout", Value: time.Second * 30, Sources: cli.EnvVars("NATS_TIMEOUT")},
-			&cli.IntFlag{Name: "nats-max-pending", Value: 4000, Sources: cli.EnvVars("NATS_MAX_PENDING")},
 			&cli.StringFlag{Name: "nats-namespace", Value: "CREEK", Sources: cli.EnvVars("NATS_NAMESPACE")},
 			&cli.IntFlag{Name: "prometheus-port", Value: 7779, Sources: cli.EnvVars("PROMETHEUS_PORT")},
 			&cli.IntFlag{Name: "nats-replicas", Value: 1, Sources: cli.EnvVars("NATS_REPLICAS")},
@@ -84,7 +83,7 @@ func serve(ctx context.Context, cmd *cli.Command) error {
 		logrus.Panicln("failed to initialize database: ", err)
 	}
 
-	queue, err := mq.New(ctx, cfg.NatsConfig.Uri, cfg.NatsConfig.NameSpace, cfg.NatsConfig.MaxPending, db)
+	queue, err := mq.New(ctx, cfg.NatsConfig.Uri, cfg.NatsConfig.NameSpace, db)
 	if err != nil {
 		logrus.Panicln("failed to initialize nats: ", err)
 	}
@@ -99,14 +98,28 @@ func serve(ctx context.Context, cmd *cli.Command) error {
 	ws := queue.StartWalStream(replication.Stream())
 	ss := queue.StartSchemaStream(replication.SchemaStream())
 
-	err = queue.StartSnapshotAPI()
-	if err != nil {
-		logrus.Panicln("failed to start snapshot api", err)
-	}
-	err = queue.StartSchemaAPI()
-	if err != nil {
-		logrus.Panicln("failed to start schema api", err)
-	}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				err = queue.ConsumeSchemaAPI()
+				time.Sleep(2 * time.Second)
+			}
+		}
+	}()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				err = queue.ConsumeSnapshotAPI()
+				time.Sleep(2 * time.Second)
+			}
+		}
+	}()
 
 	// All streams done
 	streamsDone := chanz.EveryDone(
