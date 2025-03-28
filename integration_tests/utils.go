@@ -97,14 +97,28 @@ func EnsureStarted() {
 
 		queue.StartWalStream(replication.Stream())
 		queue.StartSchemaStream(replication.SchemaStream())
-		err = queue.StartSnapshotAPI()
-		if err != nil {
-			logrus.Fatal("failed to start snapshot api", err)
-		}
-		err = queue.StartSchemaAPI()
-		if err != nil {
-			logrus.Fatal("failed to start schema api", err)
-		}
+		go func() {
+			for {
+				select {
+				case <-testCtx.Done():
+					return
+				default:
+					err = queue.ConsumeSchemaAPI()
+					time.Sleep(2 * time.Second)
+				}
+			}
+		}()
+		go func() {
+			for {
+				select {
+				case <-testCtx.Done():
+					return
+				default:
+					err = queue.ConsumeSnapshotAPI()
+					time.Sleep(2 * time.Second)
+				}
+			}
+		}()
 	})
 }
 

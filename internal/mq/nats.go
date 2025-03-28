@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modfin/henry/chanz"
+
 	"github.com/modfin/henry/slicez"
 
 	"github.com/modfin/creek"
@@ -28,80 +30,52 @@ type MQ struct {
 	snapWg    sync.WaitGroup
 	snapsDone chan struct{}
 	closeOnce sync.Once
-	doneChan  chan struct{}
 
-	cfg  config.NatsConfig
-	db   *dao.DB
-	conn *nats.Conn
+	cfg config.NatsConfig
+	db  *dao.DB
 
-	js jetstream.JetStream
+	walBusDoneChan      chan struct{}
+	schemaBusDoneChan   chan struct{}
+	snapshotBusDoneChan chan struct{}
 
-	streams    map[string]jetstream.Stream
-	publishBus chan msg
+	walBus      chan msg
+	schemaBus   chan msg
+	snapshotBus chan msg
+
+	streams   map[string]jetstream.Stream
+	streamsMu sync.RWMutex
 }
 
 type msg struct {
-	subject string
-	data    []byte
+	subject    string
+	identifier string
+	data       []byte
 }
-
-//func (mq *MQ) Done() <-chan interface{} {
-//	//return chanz.EveryDone(mq.ctx.Done())
-//	return make(<-chan interface{})
-//}
-
-//func (mq *MQ) walStreamName() string {
-//	return fmt.Sprintf("%s.wal", mq.ns)
-//}
-//func (mq *MQ) snapStreamName() string {
-//	return fmt.Sprintf("%s.snap", mq.ns)
-//}
-//func (mq *MQ) schemaStreamName() string {
-//	return fmt.Sprintf("%s.schema", mq.ns)
-//}
 
 func (mq *MQ) streamName(_type creek.StreamType) string {
 	return fmt.Sprintf("%s_%s_%s", mq.root, _type, mq.db.DatabaseName())
 }
-func (mq *MQ) assignStream(_type creek.StreamType) error {
-	streamName := mq.streamName(_type)
-
-	stream, err := mq.js.CreateOrUpdateStream(mq.ctx, jetstream.StreamConfig{
-		Name:        streamName,
-		Replicas:    mq.cfg.Replicas,
-		Description: "Creek stream relating to " + streamName,
-		Subjects:    []string{fmt.Sprintf("%s.>", streamName)},
-		MaxAge:      mq.cfg.Retention.MaxAge,
-		MaxBytes:    mq.cfg.Retention.MaxBytes,
-		MaxMsgs:     mq.cfg.Retention.MaxMsgs,
-		Retention:   mq.cfg.Retention.Policy,
-	})
-	if err != nil {
-		return err
-	}
-	mq.streams[streamName] = stream
-	return nil
-}
 
 func New(ctx context.Context, uri string, root string, db *dao.DB) (*MQ, error) {
-	var err error
 	mq := &MQ{
-		ctx:        ctx,
-		uri:        uri,
-		root:       root,
-		db:         db,
-		streams:    map[string]jetstream.Stream{},
-		publishBus: make(chan msg, 1),
-		doneChan:   make(chan struct{}),
-		snapsDone:  make(chan struct{}),
+		ctx:                 ctx,
+		uri:                 uri,
+		root:                root,
+		db:                  db,
+		walBus:              make(chan msg, 1),
+		schemaBus:           make(chan msg, 1),
+		snapshotBus:         make(chan msg, 1),
+		walBusDoneChan:      make(chan struct{}),
+		schemaBusDoneChan:   make(chan struct{}),
+		snapshotBusDoneChan: make(chan struct{}),
+		snapsDone:           make(chan struct{}),
+		streamsMu:           sync.RWMutex{},
+		streams:             make(map[string]jetstream.Stream),
 	}
 
-	err = mq.connect()
-	if err != nil {
-		return nil, err
-	}
-
-	go mq.startBus()
+	go mq.startBus(creek.WalStream)
+	go mq.startBus(creek.SchemaStream)
+	go mq.startBus(creek.SnapStream)
 	go func() {
 		<-ctx.Done()
 		mq.snapWg.Wait()
@@ -119,56 +93,104 @@ func (mq *MQ) SnapsDone() <-chan struct{} {
 
 func (mq *MQ) Close() {
 	mq.closeOnce.Do(func() {
-		close(mq.publishBus)
+		close(mq.walBus)
+		close(mq.schemaBus)
+		close(mq.snapshotBus)
 	})
 }
 
 func (mq *MQ) Done() <-chan struct{} {
-	return mq.doneChan
+	return chanz.EveryDone(mq.walBusDoneChan, mq.schemaBusDoneChan, mq.snapshotBusDoneChan)
 }
 
-func (mq *MQ) connect() error {
+func (mq *MQ) getConnection(streamName string) (*nats.Conn, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		return fmt.Errorf("could not get hostname, err %v", err)
+		return nil, fmt.Errorf("could not get hostname, err %v", err)
 	}
 	hostname = strings.Split(hostname, ".")[0]
 	opts := []nats.Option{
 		nats.Name(hostname),
 		nats.PingInterval(2 * time.Second),
-		nats.RetryOnFailedConnect(true),
-		nats.MaxReconnects(-1),
-		nats.ReconnectHandler(func(conn *nats.Conn) {
-			logrus.Info("reconnected to nats")
-		}),
-		nats.DisconnectErrHandler(func(conn *nats.Conn, err error) {
-			logrus.Errorf("disconnected from nats: %v", err)
-		}),
 	}
 	logrus.Infof("connecting to nats %s", mq.uri)
-	mq.conn, err = nats.Connect(mq.uri, opts...)
+	conn, err := nats.Connect(mq.uri, opts...)
 	if err != nil {
-		return fmt.Errorf("could not connect to nats, err %v", err)
+		return nil, fmt.Errorf("could not connect to nats, err %v", err)
 	}
-
-	mq.js, err = jetstream.New(mq.conn)
+	return conn, nil
+}
+func (mq *MQ) getJetstream(streamName string) (*jetstream.JetStream, error) {
+	conn, err := mq.getConnection(streamName)
 	if err != nil {
-		return fmt.Errorf("could not create jetstream, err %v", err)
+		return nil, fmt.Errorf("could not get connection, err %v", err)
 	}
-
-	for _, t := range []creek.StreamType{creek.WalStream, creek.SnapStream, creek.SchemaStream} {
-		err = mq.assignStream(t)
-		if err != nil {
-			return fmt.Errorf("could not assign stream, err %v", err)
-		}
+	js, err := jetstream.New(conn)
+	if err != nil {
+		return nil, fmt.Errorf("could not create jetstream, err %v", err)
 	}
-	return nil
+	return &js, nil
 }
 
-func (mq *MQ) startBus() {
-	maxPayload := int(mq.conn.MaxPayload()) - 2 - 4 - 1
+func (mq *MQ) startBus(_type creek.StreamType) {
+	var bus <-chan msg
+	var doneChan chan struct{}
+	switch _type {
+	case creek.WalStream:
+		bus = mq.walBus
+		doneChan = mq.walBusDoneChan
+	case creek.SchemaStream:
+		bus = mq.schemaBus
+		doneChan = mq.schemaBusDoneChan
+	case creek.SnapStream:
+		bus = mq.snapshotBus
+		doneChan = mq.snapshotBusDoneChan
+	}
 
-	for m := range mq.publishBus {
+	maxPayload := 0
+maxPayloadLoop:
+	for {
+		select {
+		case <-mq.ctx.Done():
+			return
+		default:
+			conn, err := mq.getConnection(mq.streamName(_type))
+			if err != nil {
+				logrus.Errorf("could not get connection to determine max payload size, err %v", err)
+				time.Sleep(time.Second * 2)
+				continue
+			}
+			maxPayload = int(conn.MaxPayload()) - 2 - 4 - 1
+			conn.Close()
+			break maxPayloadLoop
+		}
+	}
+
+	packetsChan := make(chan packetMessage, 1)
+
+	go func() {
+		for {
+			select {
+			case <-mq.ctx.Done():
+				return
+			default:
+				fmt.Println("consuming packets")
+				unhandledMessage, err := mq.consumePackets(mq.streamName(_type), packetsChan)
+				if err != nil {
+					logrus.Errorf("could not consume packets, err %v", err)
+					time.Sleep(time.Second * 2)
+					continue
+				}
+				if unhandledMessage != nil {
+					go func() {
+						packetsChan <- *unhandledMessage
+					}() // TODO: how stupid is this?
+				}
+			}
+		}
+	}()
+
+	for m := range bus {
 		length := make([]byte, 4)
 		binary.BigEndian.PutUint32(length, uint32(len(m.data)))
 		packets := uint16(1 + (len(m.data))/maxPayload)
@@ -184,47 +206,55 @@ func (mq *MQ) startBus() {
 			ii := int(i)
 			// TODO integration_tests off by 1 stuff....
 			packet = append(packet, m.data[ii*maxPayload:slicez.Min((ii+1)*maxPayload, len(m.data))]...)
-
-		sendLoop:
-			for {
-				_, err := mq.js.Publish(mq.ctx, m.subject, packet)
-				if err != nil {
-					logrus.Errorf("could not publish to nats on %s, err %v", m.subject, err)
-					mq.reconnector()
-				} else {
-					break sendLoop
-				}
-			}
+			packetsChan <- packetMessage{subject: m.subject, data: packet, id: fmt.Sprintf("%s-seq-%d", m.identifier, i)}
 		}
 	}
-	logrus.Info("closed publish bus")
-	mq.doneChan <- struct{}{}
+
+	logrus.Infof("closed %s bus", _type)
+	doneChan <- struct{}{}
 }
 
-func (mq *MQ) reconnector() {
-	if !mq.conn.IsReconnecting() {
-		err := mq.conn.ForceReconnect()
-		// function code never return error
-		if err != nil {
-			logrus.Errorf("could not force reconnection")
-		}
+type packetMessage struct {
+	subject string
+	id      string
+	data    []byte
+}
+
+func (mq *MQ) consumePackets(streamName string, packetsChan <-chan packetMessage) (unhandledMessage *packetMessage, err error) {
+	js, err := mq.getJetstream(streamName)
+	if err != nil {
+		return nil, fmt.Errorf("could not create jetstream, err %v", err)
 	}
+	if js == nil {
+		return nil, fmt.Errorf("nil jetstream object, err")
+	}
+
+	logrus.Infof("upserting nats stream %s", streamName)
+	stream, err := (*js).CreateOrUpdateStream(mq.ctx, jetstream.StreamConfig{
+		Name:        streamName,
+		Replicas:    mq.cfg.Replicas,
+		Description: "Creek stream relating to " + streamName,
+		Subjects:    []string{fmt.Sprintf("%s.>", streamName)},
+		MaxAge:      mq.cfg.Retention.MaxAge,
+		MaxBytes:    mq.cfg.Retention.MaxBytes,
+		MaxMsgs:     mq.cfg.Retention.MaxMsgs,
+		Retention:   mq.cfg.Retention.Policy,
+	})
+
+	mq.streamsMu.Lock()
+	mq.streams[streamName] = stream
+	mq.streamsMu.Unlock()
+
 	for {
 		select {
-		case <-mq.doneChan:
-			return
-		case <-mq.conn.StatusChanged(nats.CONNECTED):
-			return
-		case <-time.After(time.Second * 10):
-			if mq.conn.IsConnected() {
-				logrus.Info("reconnected to nats")
-				return
-			}
-			logrus.Warn("failed to reconnect to nats, tries again")
-			err := mq.conn.ForceReconnect()
+		case <-mq.ctx.Done():
+			return nil, nil
+		case packet := <-packetsChan:
+			_, err := (*js).Publish(mq.ctx, packet.subject, packet.data, jetstream.WithMsgID(packet.id))
 			if err != nil {
-				logrus.Errorf("could not force reconnection")
+				return &packet, err
 			}
+
 		}
 	}
 }
