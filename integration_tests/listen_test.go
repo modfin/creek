@@ -2,7 +2,6 @@ package integration_tests
 
 import (
 	"encoding/base64"
-	"fmt"
 	"testing"
 	"time"
 
@@ -12,24 +11,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSetup(t *testing.T) {
-	db := GetDBConn()
-
-	var numRows int
-	err := db.QueryRow(TimeoutContext(time.Second), "SELECT count(*) FROM public.types_data").Scan(&numRows)
-	assert.NoError(t, err)
-	assert.Equal(t, 1000, numRows)
-}
-
 func TestInsert(t *testing.T) {
-	EnsureStarted()
+	teardownTest := setupTest(t)
+	defer teardownTest(t)
+
 	db := GetDBConn()
 	creekConn := GetCreekConn()
 
 	_, err := db.Exec(TimeoutContext(time.Second), "INSERT INTO public.other VALUES (1, 'test');")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.StreamWAL(TimeoutContext(time.Second*5), "public", "other")
+	stream, err := creekConn.StreamWALFrom(TimeoutContext(time.Second*5), "public", "other", time.Now(), "0/0")
 	assert.NoError(t, err)
 
 	msg, err := stream.Next(TimeoutContext(time.Second))
@@ -77,22 +69,35 @@ func TestInsert(t *testing.T) {
 
 	assert.Equal(t, &expected, msg.After)
 
+	_, err = db.Exec(TimeoutContext(time.Second), `
+		INSERT INTO public.other 
+		VALUES (3, 'new stuff'),
+		       (4, 'new stuff'),
+		       (5, 'new stuff'),
+		       (6, 'new stuff'),
+		       (7, 'new stuff'),
+		       (8, 'new stuff');
+	`)
+	assert.NoError(t, err)
+
+	messages := countMessages(t.Context(), stream)
+	assert.Equal(t, 6, messages)
 }
 
 func TestUpdate(t *testing.T) {
-	EnsureStarted()
+	teardownTest := setupTest(t)
+	defer teardownTest(t)
+	now := time.Now()
 	db := GetDBConn()
 	creekConn := GetCreekConn()
-
-	now := time.Now()
-	fmt.Printf("now: %+v\n", now)
 
 	_, err := db.Exec(TimeoutContext(time.Second), "UPDATE public.other SET data='cool' WHERE id=1;")
 	assert.NoError(t, err)
 	_, err = db.Exec(TimeoutContext(time.Second), "UPDATE public.other SET id=100 WHERE id=1;")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.StreamWALFrom(TimeoutContext(time.Second*5), "public", "other", now, "0/0")
+	stream, err := creekConn.StreamWALFrom(t.Context(), "public", "other", now, "0/0")
+
 	assert.NoError(t, err)
 
 	msg, err := stream.Next(TimeoutContext(time.Second))
@@ -111,7 +116,8 @@ func TestUpdate(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	EnsureStarted()
+	teardownTest := setupTest(t)
+	defer teardownTest(t)
 	db := GetDBConn()
 	creekConn := GetCreekConn()
 
@@ -132,11 +138,11 @@ func TestDelete(t *testing.T) {
 }
 
 func TestSnap(t *testing.T) {
-	EnsureStarted()
-	//db := GetDBConn()
+	teardownTest := setupTest(t)
+	defer teardownTest(t)
 	creekConn := GetCreekConn()
 
-	reader, err := creekConn.Snapshot(TimeoutContext(time.Second*5), "public", "types_data")
+	reader, closeF, err := creekConn.Snapshot(t.Context(), "public", "types_data")
 	assert.NoError(t, err)
 
 	i := 0
@@ -146,12 +152,14 @@ func TestSnap(t *testing.T) {
 
 	assert.Equal(t, 1000, i)
 
-	data, err := creekConn.ListSnapshots(TimeoutContext(time.Second), "public", "types_data")
+	data, err := creekConn.ListSnapshots(t.Context(), "public", "types_data")
 	assert.NoError(t, err)
 
+	closeF()
 	// Should return the same as above
-	reader, err = creekConn.GetSnapshot(TimeoutContext(time.Second*5), data[0].Name)
+	reader, closeF, err = creekConn.GetSnapshot(t.Context(), data[0].Name)
 	assert.NoError(t, err)
+	defer closeF()
 
 	i = 0
 	for range reader.Chan() {
@@ -162,7 +170,8 @@ func TestSnap(t *testing.T) {
 }
 
 func TestTypes(t *testing.T) {
-	EnsureStarted()
+	teardownTest := setupTest(t)
+	defer teardownTest(t)
 	db := GetDBConn()
 	creekConn := GetCreekConn()
 
@@ -192,7 +201,8 @@ VALUES (true, 'a', 'hi', 'hello', '2023-01-23', 0.23, 12.32, 123, 231, 123123, '
 }
 
 func TestSchema(t *testing.T) {
-	EnsureStarted()
+	teardownTest := setupTest(t)
+	defer teardownTest(t)
 	creekConn := GetCreekConn()
 
 	expectedJSON := `
@@ -236,10 +246,6 @@ func TestSchema(t *testing.T) {
                     {
                         "name": "tx_id",
                         "type": "long"
-                    },
-                    {
-                        "name": "last_lsn",
-                        "type": "string"
                     },
                     {
                         "name": "lsn",
@@ -764,14 +770,15 @@ func TestSchema(t *testing.T) {
 }
 
 func TestPartitions(t *testing.T) {
-	EnsureStarted()
+	teardownTest := setupTest(t)
+	defer teardownTest(t)
 	db := GetDBConn()
 	creekConn := GetCreekConn()
 
 	_, err := db.Exec(TimeoutContext(time.Second), "INSERT INTO public.prices VALUES (1, 43.01, '2022-09-13'), (2, 16.98, '2023-09-13');")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.StreamWAL(TimeoutContext(time.Second*5), "public", "prices")
+	stream, err := creekConn.StreamWAL(t.Context(), "public", "prices")
 	assert.NoError(t, err)
 
 	msg, err := stream.Next(TimeoutContext(time.Second))
@@ -788,7 +795,8 @@ func TestPartitions(t *testing.T) {
 }
 
 func TestRestart(t *testing.T) {
-	EnsureStarted()
+	teardownTest := setupTest(t)
+	defer teardownTest(t)
 	db := GetDBConn()
 	creekConn := GetCreekConn()
 
@@ -810,7 +818,7 @@ func TestRestart(t *testing.T) {
 	_, err = db.Exec(TimeoutContext(time.Second), "INSERT INTO public.other VALUES (999, 'reconnect');")
 	assert.NoError(t, err)
 
-	stream, err := creekConn.StreamWALFrom(TimeoutContext(time.Second*5), "public", "other", now, "0/0")
+	stream, err := creekConn.StreamWALFrom(t.Context(), "public", "other", now, "0/0")
 	assert.NoError(t, err)
 
 	msg, err := stream.Next(TimeoutContext(time.Second * 2))

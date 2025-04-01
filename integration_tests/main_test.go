@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modfin/creek"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/modfin/creek/integration_tests/env"
 
 	"github.com/sirupsen/logrus"
@@ -15,9 +18,7 @@ import (
 const testNetName = "creek-db-integration_tests-net"
 
 func TestMain(m *testing.M) {
-	var testCancel context.CancelFunc
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	testCtx, testCancel = context.WithTimeout(context.Background(), time.Minute)
 
 	// Setup test environment, Docker network and Docker containers
 	if err := setupTestEnvironment(ctx); err != nil {
@@ -30,7 +31,6 @@ func TestMain(m *testing.M) {
 
 	// Run tests...
 	exitCode := m.Run()
-	testCancel()
 
 	// Shut down test containers
 	shutdownTestContainers(ctx)
@@ -61,4 +61,45 @@ func setupTestEnvironment(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func setupTest(tb testing.TB) func(tb testing.TB) {
+	ctx, cancel := context.WithCancel(tb.Context())
+	queue, streamsDone := EnsureStarted(ctx)
+	db := GetDBConn()
+
+	var numRows int
+	err := db.QueryRow(ctx, "SELECT count(*) FROM public.types_data").Scan(&numRows)
+	assert.NoError(tb, err)
+	assert.Equal(tb, 1000, numRows)
+
+	return func(tb testing.TB) {
+		cancel()
+		for {
+			select {
+			case <-queue.Done():
+				return
+			case <-streamsDone:
+				// Now we can close and wait until everything has published
+				queue.Close()
+			case <-time.After(1 * time.Second):
+				logrus.Info("waiting to shutdown tests")
+			}
+		}
+	}
+}
+
+func countMessages(ctx context.Context, stream *creek.WALStream) int {
+	messageCtx, cancel := context.WithDeadline(ctx, time.Now().Add(2*time.Second))
+	messages := 0
+messageLoop:
+	for {
+		_, err := stream.Next(messageCtx)
+		if err != nil {
+			break messageLoop
+		}
+		messages++
+	}
+	cancel()
+	return messages
 }

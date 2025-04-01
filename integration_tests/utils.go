@@ -9,14 +9,13 @@ import (
 	"github.com/modfin/creek/internal/config"
 	"github.com/modfin/creek/internal/dao"
 	"github.com/modfin/creek/internal/mq"
+	"github.com/modfin/henry/chanz"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/sirupsen/logrus"
 )
 
-var start sync.Once
-var conn *creek.Conn
-var connOnce sync.Once
-var testCtx context.Context
+var cl *creek.Client
+var clientOnce sync.Once
 
 type LogMsgCounter struct {
 	msgs int
@@ -53,10 +52,9 @@ func GetConfig() config.Config {
 		},
 		Tables: []string{"public.types_data", "public.other", "public.types", "public.prices"},
 		NatsConfig: config.NatsConfig{
-			Uri:        GetNATSURL(),
-			Timeout:    time.Second * 10,
-			MaxPending: 100,
-			NameSpace:  "CREEK",
+			Uri:       GetNATSURL(),
+			Timeout:   time.Second * 10,
+			NameSpace: "CREEK",
 			Retention: config.RetentionConfig{
 				Policy:   jetstream.LimitsPolicy,
 				MaxAge:   0,
@@ -68,59 +66,82 @@ func GetConfig() config.Config {
 
 }
 
-func EnsureStarted() {
-	start.Do(func() {
-		cfg := GetConfig()
+func EnsureStarted(ctx context.Context) (*mq.MQ, <-chan struct{}) {
+	cfg := GetConfig()
 
-		msgCounter = &LogMsgCounter{msgs: 0}
+	msgCounter = &LogMsgCounter{msgs: 0}
 
-		logrus.AddHook(msgCounter)
+	logrus.AddHook(msgCounter)
 
-		db, err := dao.New(testCtx, cfg)
-		if err != nil {
-			logrus.Fatal("failed to initialize database: ", err)
+	db, err := dao.New(ctx, cfg)
+	if err != nil {
+		logrus.Fatal("failed to initialize database: ", err)
+	}
+
+	err = db.Connect(ctx)
+	if err != nil {
+		logrus.Fatal("failed to connect to database: ", err)
+	}
+
+	queue, err := mq.New(ctx, cfg.NatsConfig.Uri, cfg.NatsConfig.NameSpace, db)
+	if err != nil {
+		logrus.Fatal("failed to initialize nats: ", err)
+	}
+
+	replication, err := db.StartReplication(cfg.Tables, cfg.PgConfig.PublicationName, cfg.PgConfig.PublicationSlot)
+	if err != nil {
+		logrus.Fatal("failed to start replication", err)
+	}
+
+	ws := queue.StartWalStream(replication.Stream())
+	ss := queue.StartSchemaStream(replication.SchemaStream())
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				err = queue.ConsumeSchemaAPI()
+				if err == nil {
+					return
+				}
+				logrus.Errorf("failed to consume schema api: %v", err)
+				time.Sleep(2 * time.Second)
+			}
 		}
+	}()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				err = queue.ConsumeSnapshotAPI()
+				if err == nil {
+					return
+				}
+				logrus.Errorf("failed to consume snapshot api: %v", err)
+				time.Sleep(2 * time.Second)
+			}
+		}
+	}()
 
-		err = db.Connect(testCtx)
-		if err != nil {
-			logrus.Fatal("failed to connect to database: ", err)
-		}
-
-		queue, err := mq.New(testCtx, cfg.NatsConfig.Uri, cfg.NatsConfig.NameSpace, cfg.NatsConfig.MaxPending, db)
-		if err != nil {
-			logrus.Fatal("failed to initialize nats: ", err)
-		}
-
-		replication, err := db.StartReplication(cfg.Tables, cfg.PgConfig.PublicationName, cfg.PgConfig.PublicationSlot)
-		if err != nil {
-			logrus.Fatal("failed to start replication", err)
-		}
-
-		queue.StartWalStream(replication.Stream())
-		queue.StartSchemaStream(replication.SchemaStream())
-		err = queue.StartSnapshotAPI()
-		if err != nil {
-			logrus.Fatal("failed to start snapshot api", err)
-		}
-		err = queue.StartSchemaAPI()
-		if err != nil {
-			logrus.Fatal("failed to start schema api", err)
-		}
-	})
+	return queue, chanz.EveryDone(
+		replication.Done(),
+		ws.Done(),
+		ss.Done(),
+		queue.SnapsDone(),
+		ctx.Done(),
+	)
 }
 
-func GetCreekConn() *creek.Conn {
-	connOnce.Do(func() {
+func GetCreekConn() *creek.Client {
+	clientOnce.Do(func() {
 		cfg := GetConfig()
-
-		var err error
-		conn, err = creek.NewClient(cfg.NatsConfig.Uri, cfg.NatsConfig.NameSpace, DBname).Connect(context.Background())
-		if err != nil {
-			logrus.Fatal("failed to connect client", err)
-		}
+		cl = creek.NewClient(cfg.NatsConfig.Uri, cfg.NatsConfig.NameSpace, DBname)
 	})
 
-	return conn
+	return cl
 }
 
 func TimeoutContext(timeout time.Duration) context.Context {

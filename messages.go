@@ -26,14 +26,13 @@ const (
 
 // MessageSource source information about a WAL message
 type MessageSource struct {
-	Name    string    `json:"name" avro:"name"`
-	TxAt    time.Time `json:"tx_at" avro:"tx_at"`
-	DB      string    `json:"db" avro:"db"`
-	Schema  string    `json:"schema" avro:"schema"`
-	Table   string    `json:"table" avro:"table"`
-	TxId    uint32    `json:"tx_id" avro:"tx_id"`
-	LastLSN string    `json:"last_lsn" avro:"last_lsn"`
-	LSN     string    `json:"lsn" avro:"lsn"`
+	Name   string    `json:"name" avro:"name"`
+	TxAt   time.Time `json:"tx_at" avro:"tx_at"`
+	DB     string    `json:"db" avro:"db"`
+	Schema string    `json:"schema" avro:"schema"`
+	Table  string    `json:"table" avro:"table"`
+	TxId   uint32    `json:"tx_id" avro:"tx_id"`
+	LSN    string    `json:"lsn" avro:"lsn"`
 }
 
 type WAL struct {
@@ -74,7 +73,6 @@ func AvroSchema(before, after *pgtypeavro.Record) pgtypeavro.Schema {
 					{Name: "schema", Type: pgtypeavro.TypeStr},
 					{Name: "table", Type: pgtypeavro.TypeStr},
 					{Name: "tx_id", Type: pgtypeavro.TypeLong},
-					{Name: "last_lsn", Type: pgtypeavro.TypeStr},
 					{Name: "lsn", Type: pgtypeavro.TypeStr},
 				},
 			}},

@@ -17,6 +17,7 @@ import (
 	"github.com/modfin/henry/chanz"
 	"github.com/modfin/henry/mapz"
 	"github.com/modfin/henry/slicez"
+	"github.com/sirupsen/logrus"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -130,57 +131,52 @@ func (c *Client) GetStreamName(streamType StreamType) string {
 	return fmt.Sprintf("%s_%s_%s", c.rootNs, streamType, c.db)
 }
 
-// Connect Connects the Client to nats
-func (c *Client) Connect(ctx context.Context) (*Conn, error) {
+func (c *Client) getConnection() (*nats.Conn, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not get hostname, err %v", err)
 	}
 	hostname = strings.Split(hostname, ".")[0]
-
-	// Default options that can be overridden by the client
 	opts := []nats.Option{
 		nats.Name(hostname),
 		nats.PingInterval(2 * time.Second),
-		nats.MaxReconnects(-1),
 	}
-	c.natsOpts = append(opts, c.natsOpts...)
 
-	nc, err := nats.Connect(c.uri, c.natsOpts...)
+	if len(c.natsOpts) > 0 {
+		logrus.Info("applying custom nats options")
+		opts = append(opts, c.natsOpts...)
+	}
+
+	logrus.Infof("connecting to nats %s", c.uri)
+	conn, err := nats.Connect(c.uri, opts...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not connect to nats, err %v", err)
 	}
-
-	js, err := jetstream.New(nc, c.jetstreamOpts...)
-	if err != nil {
-		return nil, err
-	}
-
-	streams := make(map[StreamType]jetstream.Stream)
-	for _, streamType := range []StreamType{WalStream, SnapStream, SchemaStream} {
-		stream, err := js.Stream(ctx, c.GetStreamName(streamType))
-		if err != nil {
-			return nil, err
-		}
-		streams[streamType] = stream
-	}
-	conn := &Conn{js: js, nc: nc, streams: streams, parent: c}
-
 	return conn, nil
 }
-
-func (c *Conn) Close() {
-	if c != nil {
-		c.nc.Close()
+func (c *Client) getJetstream() (*jetstream.JetStream, error) {
+	conn, err := c.getConnection()
+	if err != nil {
+		return nil, fmt.Errorf("could not get connection, err %v", err)
 	}
+	js, err := jetstream.New(conn)
+	if err != nil {
+		return nil, fmt.Errorf("could not create jetstream, err %v", err)
+	}
+	return &js, nil
 }
 
 // GetSchema requests a schema from Creek. If no schema is found, it will hang. Please use with
 // a context with an appropriate timeout
-func (c *Conn) GetSchema(ctx context.Context, fingerprint string) (SchemaMsg, error) {
+func (c *Client) GetSchema(ctx context.Context, fingerprint string) (SchemaMsg, error) {
 	var schema SchemaMsg
+	conn, err := c.getConnection()
+	if err != nil {
+		return schema, err
+	}
+	defer conn.Close()
 
-	resp, err := c.nc.RequestWithContext(ctx, c.parent.GetStreamName(SchemaStream), []byte(fingerprint))
+	resp, err := conn.RequestWithContext(ctx, c.GetStreamName(SchemaStream), []byte(fingerprint))
 	if err != nil {
 		return schema, err
 	}
@@ -194,13 +190,22 @@ func (c *Conn) GetSchema(ctx context.Context, fingerprint string) (SchemaMsg, er
 }
 
 // GetLastSchema returns the latest schema if it exists.
-func (c *Conn) GetLastSchema(ctx context.Context, tableSchema string, table string) (schema SchemaMsg, err error) {
-	msg, err := c.streams[SchemaStream].GetLastMsgForSubject(ctx, fmt.Sprintf("%s.%s.%s", c.parent.GetStreamName(SchemaStream), tableSchema, table))
+func (c *Client) GetLastSchema(ctx context.Context, tableSchema string, table string) (schema SchemaMsg, err error) {
+	js, err := c.getJetstream()
+	if err != nil {
+		return schema, err
+	}
+	defer (*js).Conn().Close()
+	stream, err := (*js).Stream(ctx, c.GetStreamName(SchemaStream))
+	if err != nil {
+		return schema, err
+	}
+	msg, err := stream.GetLastMsgForSubject(ctx, fmt.Sprintf("%s.%s.%s", c.GetStreamName(SchemaStream), tableSchema, table))
 	if errors.Is(err, jetstream.ErrMsgNotFound) {
 		return schema, ErrNoSchemaFound
 	}
 	if err != nil {
-		return
+		return schema, err
 	}
 
 	// TODO: Can this become larger than 1 message? If so, we need to handle it
@@ -210,42 +215,54 @@ func (c *Conn) GetLastSchema(ctx context.Context, tableSchema string, table stri
 	}
 
 	err = json.Unmarshal(msg.Data[6:], &schema)
-	return
+	return schema, err
 }
 
 type WALStream struct {
 	msgs  <-chan WAL
 	close chan struct{}
+	conn  *nats.Conn
 }
 
 // StreamWALFrom opens a consumer for the database and table topic. The table topic should be in the form `<STREAM_NAME>.<DATABASE_SCHEMA>.<DATABASE_TABLE>`.
 // Starts streaming from the first message with the timestamp AND log sequence number (lsn) that is greater than the one provided.
-func (c *Conn) StreamWALFrom(ctx context.Context, tableSchema string, table string, timestamp time.Time, lsn string) (stream *WALStream, err error) {
-	topic := fmt.Sprintf("%s.%s.%s", c.parent.GetStreamName(WalStream), tableSchema, table)
-	c.parent.log.Debug(fmt.Sprintf("starting streaming WAL messages on topic %s", topic))
+func (c *Client) StreamWALFrom(ctx context.Context, tableSchema string, table string, timestamp time.Time, lsn string) (*WALStream, error) {
+	topic := fmt.Sprintf("%s.%s.%s", c.GetStreamName(WalStream), tableSchema, table)
+
+	js, err := c.getJetstream()
+	if err != nil {
+		return nil, err
+	}
+
+	stream, err := (*js).Stream(ctx, c.GetStreamName(WalStream))
+	if err != nil {
+		return nil, fmt.Errorf("could not get stream: %w", err)
+	}
+
+	c.log.Debug(fmt.Sprintf("starting streaming WAL messages on topic %s", topic))
 
 	parsedLSN, err := parseLSN(lsn)
 	if err != nil {
-		return stream, fmt.Errorf("failed to parse LSN: %w", err)
+		return nil, fmt.Errorf("failed to parse CurrentLSN: %w", err)
 	}
 
-	consumer, err := c.streams[WalStream].OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
+	consumer, err := stream.OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
 		FilterSubjects: []string{topic},
 		DeliverPolicy:  jetstream.DeliverByStartTimePolicy,
 		OptStartTime:   &timestamp,
 	})
 	if err != nil {
-		return stream, err
+		return nil, err
 	}
 
 	iter, err := consumer.Messages()
 	if err != nil {
-		return stream, err
+		return nil, err
 	}
 
 	closeChan := make(chan struct{})
 
-	msgChan := unmarshalStream(iter, closeChan, c.parent.log, func(data []byte) (wal WAL, done bool, err error) {
+	msgChan := unmarshalStream(iter, closeChan, c.log, func(data []byte) (wal WAL, done bool, err error) {
 		prefix := data[:2]
 		if prefix[0] != 0xc3 || prefix[1] != 0x01 {
 			err = fmt.Errorf("received non-avro message: %s. Ignoring", hex.Dump(data))
@@ -273,30 +290,39 @@ func (c *Conn) StreamWALFrom(ctx context.Context, tableSchema string, table stri
 		return msgLSN <= parsedLSN
 	}, chanz.OpBuffer(1))
 
-	return &WALStream{msgs: msgChan, close: closeChan}, nil
+	return &WALStream{msgs: msgChan, close: closeChan, conn: (*js).Conn()}, nil
 }
 
 // StreamWAL opens a consumer for the database and table topic. The table topic should be in the form `<STREAM_NAME>.<DATABASE_SCHEMA>.<DATABASE_TABLE>`.
-func (c *Conn) StreamWAL(ctx context.Context, tableSchema string, table string) (stream *WALStream, err error) {
-	topic := fmt.Sprintf("%s.%s.%s", c.parent.GetStreamName(WalStream), tableSchema, table)
-	c.parent.log.Info(fmt.Sprintf("starting streaming WAL messages on topic %s", topic))
+func (c *Client) StreamWAL(ctx context.Context, tableSchema string, table string) (*WALStream, error) {
+	topic := fmt.Sprintf("%s.%s.%s", c.GetStreamName(WalStream), tableSchema, table)
 
-	consumer, err := c.streams[WalStream].OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
+	js, err := c.getJetstream()
+	if err != nil {
+		return nil, err
+	}
+
+	stream, err := (*js).Stream(ctx, c.GetStreamName(WalStream))
+	if err != nil {
+		return nil, fmt.Errorf("could not get stream: %w", err)
+	}
+
+	consumer, err := stream.OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
 		FilterSubjects: []string{topic},
 	})
 
 	if err != nil {
-		return stream, err
+		return nil, err
 	}
 
 	iter, err := consumer.Messages()
 	if err != nil {
-		return stream, err
+		return nil, err
 	}
 
 	closeChan := make(chan struct{})
 
-	msgChan := unmarshalStream(iter, closeChan, c.parent.log, func(data []byte) (wal WAL, done bool, err error) {
+	msgChan := unmarshalStream(iter, closeChan, c.log, func(data []byte) (wal WAL, done bool, err error) {
 		prefix := data[:2]
 		if prefix[0] != 0xc3 || prefix[1] != 0x01 {
 			err = fmt.Errorf("received non-avro message: %s. Ignoring", hex.Dump(data))
@@ -319,12 +345,13 @@ func (c *Conn) StreamWAL(ctx context.Context, tableSchema string, table string) 
 		return walMsg, done, nil
 	})
 
-	return &WALStream{msgs: msgChan, close: closeChan}, nil
+	return &WALStream{msgs: msgChan, close: closeChan, conn: (*js).Conn()}, nil
 }
 
 // Close closes the WALStream. Can only be called once
 func (ws *WALStream) Close() {
 	ws.close <- struct{}{}
+	ws.conn.Close()
 }
 
 // Next Returns the next message in the WAL stream. Blocks until a message is received.
@@ -351,59 +378,68 @@ type SnapshotReader struct {
 }
 
 // Snapshot request a new snapshot from creek. Returns a blocking channel containing snapshot data rows.
-func (c *Conn) Snapshot(ctx context.Context, tableSchema string, table string) (*SnapshotReader, error) {
+func (c *Client) Snapshot(ctx context.Context, tableSchema string, table string) (snapshotReader *SnapshotReader, close func(), err error) {
+
+	js, err := c.getJetstream()
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("could not get jetstream, err %v", err)
+	}
+
+	stream, err := (*js).Stream(ctx, c.GetStreamName(SnapStream))
+	if err != nil {
+		return nil, (*js).Conn().Close, fmt.Errorf("could not get stream, err %v", err)
+	}
+
 	msg := SnapshotRequest{
-		Database:  c.parent.db,
+		Database:  c.db,
 		Namespace: tableSchema, // rootNs is used as namespace for streams and is called root as we don't use schema for the pg schema (instead we use namespace)
 		Table:     table,
 	}
 
 	b, err := json.Marshal(msg)
 	if err != nil {
-		return nil, err
+		return nil, (*js).Conn().Close, fmt.Errorf("could not marshal snapshot request, err %v", err)
 	}
 
-	reqCtx, cancel := context.WithTimeout(ctx, time.Second)
-	resp, err := c.nc.RequestWithContext(reqCtx, c.parent.GetStreamName(SnapStream), b)
-	cancel()
+	resp, err := (*js).Conn().RequestWithContext(ctx, c.GetStreamName(SnapStream), b)
 	if err != nil {
-		return nil, err
+		return nil, (*js).Conn().Close, fmt.Errorf("could not request snapshot, err %v", err)
 	}
 
 	topic := string(resp.Data)
 
-	consumer, err := c.streams[SnapStream].OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
+	consumer, err := stream.OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
 		FilterSubjects: []string{topic},
 	})
 	if err != nil {
-		return nil, err
+		return nil, (*js).Conn().Close, fmt.Errorf("could not create consumer, err %v", err)
 	}
 
 	iter, err := consumer.Messages()
 	if err != nil {
-		return nil, err
+		return nil, (*js).Conn().Close, fmt.Errorf("could not create iterator, err %v", err)
 	}
 
 	// Read header
 	header, err := readMessage(iter)
 	if err != nil {
-		return nil, err
+		return nil, (*js).Conn().Close, fmt.Errorf("could not read header, err %v", err)
 	}
 	var snapHeader SnapshotHeader
 	err = json.Unmarshal(header, &snapHeader)
 	if err != nil {
-		return nil, err
+		return nil, (*js).Conn().Close, fmt.Errorf("could not unmarshal header, err %v", err)
 	}
 
 	snapHeader.Topic = topic
 
 	avroSchema, err := avro.Parse(snapHeader.Schema)
 	if err != nil {
-		return nil, err
+		return nil, (*js).Conn().Close, fmt.Errorf("could not parse avro schema, err %v", err)
 	}
 
 	// Read the rest of the messages
-	streamMsgs := unmarshalStream(iter, make(<-chan struct{}), c.parent.log, func(data []byte) (SnapRow, bool, error) {
+	streamMsgs := unmarshalStream(iter, make(<-chan struct{}), c.log, func(data []byte) (SnapRow, bool, error) {
 		if isEof(data) {
 			return nil, true, nil
 		}
@@ -422,51 +458,61 @@ func (c *Conn) Snapshot(ctx context.Context, tableSchema string, table string) (
 		schema: avroSchema,
 		header: snapHeader,
 		rows:   streamMsgs,
-	}, nil
+	}, (*js).Conn().Close, nil
 }
 
-func (c *Conn) GetSnapshot(ctx context.Context, topic string) (*SnapshotReader, error) {
-	consumer, err := c.streams[SnapStream].OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
+func (c *Client) GetSnapshot(ctx context.Context, topic string) (snapshotReader *SnapshotReader, close func(), err error) {
+	js, err := c.getJetstream()
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("could not get jetstream, err %v", err)
+	}
+
+	stream, err := (*js).Stream(ctx, c.GetStreamName(SnapStream))
+	if err != nil {
+		return nil, (*js).Conn().Close, fmt.Errorf("could not get stream, err %v", err)
+	}
+
+	consumer, err := stream.OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
 		FilterSubjects: []string{topic},
 	})
 	if err != nil {
-		return nil, err
+		return nil, (*js).Conn().Close, fmt.Errorf("could not create consumer, err %v", err)
 	}
 
 	iter, err := consumer.Messages()
 	if err != nil {
-		return nil, err
+		return nil, (*js).Conn().Close, fmt.Errorf("could not create iterator, err %v", err)
 	}
 
 	i, err := consumer.Info(ctx)
 	if err != nil {
-		return nil, err
+		return nil, (*js).Conn().Close, fmt.Errorf("could not get consumer info, err %v", err)
 	}
 	// No messages here
 	if i.NumPending == 0 {
-		return nil, errors.New("snapshot topic has no messages")
+		return nil, (*js).Conn().Close, errors.New("snapshot topic has no messages")
 	}
 
 	// Read header
 	header, err := readMessage(iter)
 	if err != nil {
-		return nil, err
+		return nil, (*js).Conn().Close, fmt.Errorf("could not read header, err %v", err)
 	}
 	var snapHeader SnapshotHeader
 	err = json.Unmarshal(header, &snapHeader)
 	if err != nil {
-		return nil, err
+		return nil, (*js).Conn().Close, fmt.Errorf("could not unmarshal header, err %v", err)
 	}
 
 	snapHeader.Topic = topic
 
 	avroSchema, err := avro.Parse(snapHeader.Schema)
 	if err != nil {
-		return nil, err
+		return nil, nil, fmt.Errorf("could not parse avro schema, err %v", err)
 	}
 
 	// Read the rest of the messages
-	streamMsgs := unmarshalStream(iter, make(<-chan struct{}), c.parent.log, func(data []byte) (SnapRow, bool, error) {
+	streamMsgs := unmarshalStream(iter, make(<-chan struct{}), c.log, func(data []byte) (SnapRow, bool, error) {
 		if isEof(data) {
 			return nil, true, nil
 		}
@@ -485,7 +531,7 @@ func (c *Conn) GetSnapshot(ctx context.Context, topic string) (*SnapshotReader, 
 		schema: avroSchema,
 		header: snapHeader,
 		rows:   streamMsgs,
-	}, nil
+	}, (*js).Conn().Close, nil
 }
 
 type SnapMetadata struct {
@@ -495,8 +541,18 @@ type SnapMetadata struct {
 }
 
 // ListSnapshots returns a sorted list (in ascending order by creation date) of existing snapshots for a particular table
-func (c *Conn) ListSnapshots(ctx context.Context, tableSchema string, table string) ([]SnapMetadata, error) {
-	info, err := c.streams[SnapStream].Info(ctx, jetstream.WithSubjectFilter(fmt.Sprintf("%s.%s.%s.*", c.parent.GetStreamName(SnapStream), tableSchema, table)))
+func (c *Client) ListSnapshots(ctx context.Context, tableSchema string, table string) ([]SnapMetadata, error) {
+	js, err := c.getJetstream()
+	if err != nil {
+		return nil, err
+	}
+	defer (*js).Conn().Close()
+	stream, err := (*js).Stream(ctx, c.GetStreamName(SnapStream))
+	if err != nil {
+		return nil, fmt.Errorf("could not get stream: %w", err)
+	}
+	info, err := stream.Info(ctx, jetstream.WithSubjectFilter(fmt.Sprintf("%s.%s.%s.*", c.GetStreamName(SnapStream), tableSchema, table)))
+
 	if err != nil {
 		return nil, err
 	}
@@ -686,21 +742,27 @@ func unmarshalStream[T any](iter jetstream.MessagesContext, closeChan <-chan str
 	return msgChan
 }
 
-func (c *Conn) getAvroSchema(ctx context.Context, fingerprint string) (avro.Schema, error) {
+func (c *Client) getAvroSchema(ctx context.Context, fingerprint string) (avro.Schema, error) {
 
 	avroSchema, ok := schemaCache.Get(fingerprint)
 	if ok {
 		return avroSchema, nil
 	}
 
-	c.parent.log.Info(fmt.Sprintf("Requesting schema for fingerprint %s on topic %s", fingerprint, c.parent.GetStreamName(SchemaStream)))
+	c.log.Info(fmt.Sprintf("Requesting schema for fingerprint %s on topic %s", fingerprint, c.GetStreamName(SchemaStream)))
 
-	resp, err := c.nc.RequestWithContext(ctx, c.parent.GetStreamName(SchemaStream), []byte(fingerprint))
+	conn, err := c.getConnection()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	resp, err := conn.RequestWithContext(ctx, c.GetStreamName(SchemaStream), []byte(fingerprint))
 	if err != nil {
 		return nil, err
 	}
 
-	c.parent.log.Info(fmt.Sprintf("Recieved schema for fingerptint %s", fingerprint))
+	c.log.Info(fmt.Sprintf("Recieved schema for fingerptint %s", fingerprint))
 
 	var schemaMsg SchemaMsg
 
@@ -719,7 +781,7 @@ func (c *Conn) getAvroSchema(ctx context.Context, fingerprint string) (avro.Sche
 	return avroSchema, nil
 }
 
-// ParseLSN parses the given XXX/XXX text format LSN used by PostgreSQL.
+// ParseLSN parses the given XXX/XXX text format CurrentLSN used by PostgreSQL.
 // From https://github.com/jackc/pglogrepl/blob/d0818e1fbef75e7a3e2f6887e022959904dae6a2/pglogrepl.go#L95
 func parseLSN(s string) (lsn, error) {
 	var upperHalf uint64
@@ -727,11 +789,11 @@ func parseLSN(s string) (lsn, error) {
 	var nparsed int
 	nparsed, err := fmt.Sscanf(s, "%X/%X", &upperHalf, &lowerHalf)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse LSN: %w", err)
+		return 0, fmt.Errorf("failed to parse CurrentLSN: %w", err)
 	}
 
 	if nparsed != 2 {
-		return 0, fmt.Errorf("failed to parsed LSN: %s", s)
+		return 0, fmt.Errorf("failed to parsed CurrentLSN: %s", s)
 	}
 
 	return lsn((upperHalf << 32) + lowerHalf), nil

@@ -223,10 +223,11 @@ func (db *DB) StartReplication(tables []string, publicationName string, publicat
 		cancel:   cancel,
 		doneChan: make(chan struct{}),
 
-		conn:    conn,
-		currLSN: lsn,
-		xlogPos: lsn,
-		prevLSN: lsn,
+		conn: conn,
+
+		AckedLSN:     lsn,
+		CurrentLSN:   lsn,
+		prevAckedLSN: lsn,
 
 		messages:       make(chan creek.WAL, 1),
 		schemaMessages: make(chan creek.SchemaMsg, 1),
